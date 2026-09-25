@@ -1,0 +1,107 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>CryoSpawn Orchestrator</title>
+    <!-- Tailwind CSS for modern, zero-config styling -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body class="bg-slate-50 text-slate-900 font-sans p-8 min-h-screen">
+    
+    <div class="max-w-6xl mx-auto">
+        <header class="mb-8 flex justify-between items-center">
+            <div>
+                <h1 class="text-3xl font-bold tracking-tight text-slate-900">CryoSpawn</h1>
+                <p class="text-slate-500 text-sm mt-1">Local MicroVM Orchestrator</p>
+            </div>
+            <div id="connection-status" class="flex items-center text-sm font-medium text-amber-500">
+                <span class="relative flex h-3 w-3 mr-2">
+                  <span class="animate-ping absolute inline-flex h-full w-full rounded-full bg-amber-400 opacity-75"></span>
+                  <span class="relative inline-flex rounded-full h-3 w-3 bg-amber-500"></span>
+                </span>
+                Connecting to Daemon...
+            </div>
+        </header>
+
+        <div class="grid grid-cols-1 lg:grid-cols-3 gap-8">
+            <!-- Left Column: Spawn Form -->
+            <div class="bg-white p-6 rounded-xl border border-slate-200 shadow-sm h-fit">
+                <h2 class="text-lg font-semibold mb-4">Spawn MicroVM</h2>
+                <form id="spawn-form" class="space-y-4">
+                    
+                    <div class="grid grid-cols-2 gap-4">
+                        <div>
+                            <label class="block text-sm font-medium text-slate-700 mb-1">vCPUs</label>
+                            <input type="number" id="vcpus" value="1" min="1" max="4" class="w-full border border-slate-300 rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
+                        </div>
+                        <div>
+                            <label class="block text-sm font-medium text-slate-700 mb-1">RAM (MB)</label>
+                            <input type="number" id="ram" value="512" min="128" step="128" class="w-full border border-slate-300 rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
+                        </div>
+                    </div>
+
+                    <div class="pt-2 border-t border-slate-100">
+                        <label class="block text-sm font-medium text-slate-700 mb-2">Network Configuration</label>
+                        <div class="flex items-center mb-2">
+                            <input type="radio" id="ip-auto" name="ip-mode" value="auto" checked class="mr-2 text-blue-600 focus:ring-blue-500">
+                            <label for="ip-auto" class="text-sm text-slate-600">Auto-assign IP</label>
+                        </div>
+                        <div class="flex items-center mb-2">
+                            <input type="radio" id="ip-manual" name="ip-mode" value="manual" class="mr-2 text-blue-600 focus:ring-blue-500">
+                            <label for="ip-manual" class="text-sm text-slate-600">Manual Slot (2-254)</label>
+                        </div>
+                        <input type="number" id="manual-slot" placeholder="e.g., 5 for 172.16.5.2" min="2" max="254" class="hidden w-full border border-slate-300 rounded-md px-3 py-2 text-sm mt-2 focus:outline-none focus:ring-2 focus:ring-blue-500">
+                    </div>
+
+                    <div class="pt-2 border-t border-slate-100">
+                        <label class="flex items-center cursor-pointer">
+                            <input type="checkbox" id="expose-ssh" class="sr-only peer">
+                            <div class="w-9 h-5 bg-slate-200 peer-focus:outline-none peer-focus:ring-2 peer-focus:ring-blue-500 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-blue-600 relative"></div>
+                            <span class="ml-3 text-sm font-medium text-slate-700">Expose SSH to LAN</span>
+                        </label>
+                        <p class="text-xs text-slate-500 mt-1 ml-12">Maps host port 220X to VM port 22</p>
+                    </div>
+
+                    <button type="submit" id="spawn-btn" class="w-full bg-slate-900 text-white font-medium py-2 px-4 rounded-md hover:bg-slate-800 transition-colors mt-4">
+                        Initialize VM
+                    </button>
+                </form>
+            </div>
+
+            <!-- Right Column: VM List -->
+            <div class="lg:col-span-2 bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
+                <div class="px-6 py-4 border-b border-slate-200 bg-slate-50">
+                    <h2 class="text-lg font-semibold text-slate-800">Active Fleet</h2>
+                </div>
+                <div class="overflow-x-auto">
+                    <table class="w-full text-sm text-left">
+                        <thead class="text-xs text-slate-500 uppercase bg-slate-50 border-b border-slate-200">
+                            <tr>
+                                <th class="px-6 py-3">ID / Net</th>
+                                <th class="px-6 py-3">Status</th>
+                                <th class="px-6 py-3">Guest IP</th>
+                                <th class="px-6 py-3">Specs</th>
+                                <th class="px-6 py-3 text-right">Actions</th>
+                            </tr>
+                        </thead>
+                        <tbody id="vm-table-body" class="divide-y divide-slate-100">
+                            <!-- Populated by JS -->
+                        </tbody>
+                    </table>
+                </div>
+                <!-- Empty State -->
+                <div id="empty-state" class="hidden text-center py-12">
+                    <svg class="mx-auto h-12 w-12 text-slate-300" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1" d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 002-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10" />
+                    </svg>
+                    <p class="mt-4 text-sm text-slate-500">No microVMs running.</p>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="app.js"></script>
+</body>
+</html>
