@@ -26,6 +26,7 @@ int main() {
             response_json.push_back({
                 {"id", vm.id},
                 {"ip", vm.ip},
+                {"host_ip", vm.host_ip},
                 {"status", vm.status},
                 {"vcpus", vm.vcpus},
                 {"mem_mib", vm.mem_mib},
@@ -63,7 +64,7 @@ int main() {
 
         try {
             // Allocate resources and fork Firecracker immediately
-            MicroVM vm = manager.create_vm(vcpus, mem_mib, expose_ssh, manual_slot);
+            MicroVM vm = manager.create_vm(vcpus, mem_mib, expose_ssh);
             
             // Run the slow socket configuration in a background thread 
             // so the HTTP request returns the ID immediately to the UI
@@ -76,6 +77,29 @@ int main() {
             };
             res.set_content(response.dump(), "application/json");
 
+        } catch (const std::exception& e) {
+            res.status = 500;
+            res.set_content(json{{"error", e.what()}}.dump(), "application/json");
+        }
+    });
+
+    svr.Post(R"(/api/vms/(\d+)/restart)", [&](const httplib::Request& req, httplib::Response& res) {
+        int id = std::stoi(req.matches[1]);
+        
+        // 1. Terminate current instance and clean network/sockets
+        manager.terminate_vm(id);
+        
+        // 2. Allow kernel/tap cleanup to settle
+        std::this_thread::sleep_for(std::chrono::milliseconds(200));
+
+        // 3. Respawn using the exact same slot ID
+        try {
+            MicroVM vm = manager.create_vm(1, 512, false); // or pass preserved specs
+            std::thread([&manager, vm, KERNEL_PATH, ROOTFS_PATH]() {
+                manager.configure_and_start(vm.id, KERNEL_PATH, ROOTFS_PATH);
+            }).detach();
+
+            res.set_content(R"({"status": "restarting"})", "application/json");
         } catch (const std::exception& e) {
             res.status = 500;
             res.set_content(json{{"error", e.what()}}.dump(), "application/json");

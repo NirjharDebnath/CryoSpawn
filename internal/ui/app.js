@@ -7,21 +7,7 @@ const spawnForm = document.getElementById('spawn-form');
 const spawnBtn = document.getElementById('spawn-btn');
 const connStatus = document.getElementById('connection-status');
 const ipRadios = document.getElementsByName('ip-mode');
-const manualSlotInput = document.getElementById('manual-slot');
 
-// Toggle Manual IP Input
-ipRadios.forEach(radio => {
-    radio.addEventListener('change', (e) => {
-        if (e.target.value === 'manual') {
-            manualSlotInput.classList.remove('hidden');
-            manualSlotInput.required = true;
-        } else {
-            manualSlotInput.classList.add('hidden');
-            manualSlotInput.required = false;
-            manualSlotInput.value = '';
-        }
-    });
-});
 
 // Fetch and render VMs
 async function fetchVMs() {
@@ -58,13 +44,25 @@ function renderTable(vms) {
                 <div class="text-xs text-slate-500 font-mono">${vm.tap_name}</div>
             </td>
             <td class="px-6 py-4 whitespace-nowrap">
-                ${vm.status === 'running' 
-                    ? `<span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-green-100 text-green-800 border border-green-200">Running</span>`
-                    : `<span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-blue-100 text-blue-800 border border-blue-200 status-booting">Booting...</span>`
-                }
+                ${(() => {
+                    if (vm.status === 'running') 
+                        return `<span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-green-100 text-green-800 border border-green-200">Running</span>`;
+                    if (vm.status === 'booting') 
+                        return `<span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-blue-100 text-blue-800 border border-blue-200 status-booting">Booting...</span>`;
+                    if (vm.status === 'stopped') 
+                        return `<span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-gray-100 text-gray-800 border border-gray-200">Stopped</span>`;
+                    return `<span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-red-100 text-red-800 border border-red-200">${vm.status}</span>`;
+                })()}
             </td>
-            <td class="px-6 py-4 whitespace-nowrap">
-                <div class="text-sm font-mono text-slate-700">${vm.ip}</div>
+            <td class="px-6 py-5 whitespace-nowrap">
+                <div class="flex items-center space-x-2">
+                    <span class="text-xs font-semibold uppercase tracking-wider text-slate-400 inline-block">VM:</span>
+                    <span class="text-sm font-mono text-blue-800 font-medium select-all bg-slate-100 p-1 rounded">${vm.ip}</span>
+                </div>
+                <div class="flex items-center space-x-2 mt-0.5">
+                    <span class="text-xs font-semibold uppercase tracking-wider text-slate-400">GW:</span>
+                    <span class="text-sm font-mono text-blue-800 font-medium select-all bg-slate-100 p-1 rounded">${vm.host_ip}</span>
+                </div>
                 ${vm.ssh_exposed ? `
                     <div class="mt-2 text-xs text-slate-500">LAN SSH Access:</div>
                     <div class="text-xs bg-slate-100 p-1 rounded font-mono text-blue-600 inline-block mt-0.5 select-all">
@@ -85,32 +83,33 @@ function renderTable(vms) {
 }
 
 // Spawn a new VM
+// Spawn a new VM
 spawnForm.addEventListener('submit', async (e) => {
     e.preventDefault();
     spawnBtn.disabled = true;
     spawnBtn.textContent = "Initializing...";
 
-    const isManual = document.getElementById('ip-manual').checked;
     const payload = {
         vcpus: parseInt(document.getElementById('vcpus').value),
         mem_mib: parseInt(document.getElementById('ram').value),
-        expose_ssh: document.getElementById('expose-ssh').checked,
-        manual_slot: isManual ? parseInt(manualSlotInput.value) : null
+        expose_ssh: document.getElementById('expose-ssh').checked
     };
 
     try {
-        await fetch(API_URL, {
+        const response = await fetch(API_URL, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(payload)
         });
         
-        // Reset form to defaults
+        if (!response.ok) throw new Error("Server rejected request");
+        
+        // Reset form to defaults (removed the manualSlotInput line)
         spawnForm.reset();
-        manualSlotInput.classList.add('hidden');
         fetchVMs(); // Force immediate refresh
     } catch (error) {
-        alert("Failed to spawn VM. Is the daemon running?");
+        console.error("Spawn error:", error);
+        alert("Failed to spawn VM. Check browser console for details.");
     } finally {
         spawnBtn.disabled = false;
         spawnBtn.textContent = "Initialize VM";

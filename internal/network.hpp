@@ -35,7 +35,8 @@ bool setup_cryo_network(const std::string& tap_name, const std::string& host_ip,
     std::cout << "[*] Configuring network on " << tap_name << " (NAT out via " << out_iface << ")...\n";
     
     system(("sudo ip tuntap add " + tap_name + " mode tap").c_str());
-    system(("sudo ip addr add " + host_ip + "/24 dev " + tap_name).c_str());
+    // CHANGE /24 TO /30 HERE:
+    system(("sudo ip addr add " + host_ip + "/30 dev " + tap_name).c_str());
     system(("sudo ip link set " + tap_name + " up").c_str());
 
     system("sudo sysctl -w net.ipv4.ip_forward=1 > /dev/null");
@@ -80,4 +81,3 @@ void unexpose_vm_port(const std::string& out_iface, int host_port, const std::st
                       " -j DNAT --to-destination " + vm_ip + ":" + std::to_string(vm_port);
     system(cmd.c_str());
 }
-
