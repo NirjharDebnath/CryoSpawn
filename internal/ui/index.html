@@ -4,17 +4,16 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>CryoSpawn Orchestrator</title>
-    <!-- Tailwind CSS for modern, zero-config styling -->
     <script src="https://cdn.tailwindcss.com"></script>
     <link rel="stylesheet" href="style.css">
 </head>
 <body class="bg-slate-50 text-slate-900 font-sans p-8 min-h-screen">
-    
-    <div class="max-w-6xl mx-auto">
-        <header class="mb-8 flex justify-between items-center">
+    <div class="max-w-6xl mx-auto space-y-8">
+        <!-- Header -->
+        <header class="flex justify-between items-center">
             <div>
                 <h1 class="text-3xl font-bold tracking-tight text-slate-900">CryoSpawn</h1>
-                <p class="text-slate-500 text-sm mt-1">Local MicroVM Orchestrator</p>
+                <p class="text-slate-500 text-sm mt-1">Multi-Project MicroVM Hypervisor</p>
             </div>
             <div id="connection-status" class="flex items-center text-sm font-medium text-amber-500">
                 <span class="relative flex h-3 w-3 mr-2">
@@ -30,7 +29,12 @@
             <div class="bg-white p-6 rounded-xl border border-slate-200 shadow-sm h-fit">
                 <h2 class="text-lg font-semibold mb-4">Spawn MicroVM</h2>
                 <form id="spawn-form" class="space-y-4">
-                    
+                    <div>
+                        <label class="block text-sm font-medium text-slate-700 mb-1">Project Name</label>
+                        <input type="text" id="project-name" value="default" required class="w-full border border-slate-300 rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
+                        <p class="text-xs text-slate-400 mt-1">Isolates VMs into private network zones</p>
+                    </div>
+
                     <div class="grid grid-cols-2 gap-4">
                         <div>
                             <label class="block text-sm font-medium text-slate-700 mb-1">vCPUs</label>
@@ -44,11 +48,9 @@
 
                     <div class="pt-2 border-t border-slate-100">
                         <label class="block text-sm font-medium text-slate-700 mb-2">Network Configuration</label>
-                        <div class="flex items-center mb-2">
-                            <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-purple-100 text-purple-800 border border-purple-200">
-                                Auto VPC Routing Enabled (/30 Subnets)
-                            </span>
-                        </div>
+                        <span class="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-medium bg-purple-100 text-purple-800 border border-purple-200">
+                            Isolated /30 Point-to-Point
+                        </span>
                     </div>
 
                     <div class="pt-2 border-t border-slate-100">
@@ -66,33 +68,67 @@
                 </form>
             </div>
 
-            <!-- Right Column: VM List -->
-            <div class="lg:col-span-2 bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
-                <div class="px-6 py-5 border-b border-slate-200 bg-slate-50">
-                    <h2 class="text-lg font-semibold text-slate-800">Active Fleet</h2>
+            <!-- Right Column: Fleet Table & Routing Table -->
+            <div class="lg:col-span-2 space-y-8">
+                <!-- Fleet Table -->
+                <div class="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
+                    <div class="px-6 py-4 border-b border-slate-200 bg-slate-50 flex justify-between items-center">
+                        <h2 class="text-lg font-semibold text-slate-800">Active Fleet</h2>
+                        <span id="vm-count-badge" class="text-xs font-medium px-2 py-1 bg-slate-200 text-slate-700 rounded-full">0 VMs</span>
+                    </div>
+                    <div class="overflow-x-auto">
+                        <table class="w-full text-sm text-left">
+                            <thead class="text-xs text-slate-500 uppercase bg-slate-50 border-b border-slate-200">
+                                <tr>
+                                    <th class="px-6 py-3">VM / Project</th>
+                                    <th class="px-6 py-3">Status</th>
+                                    <th class="px-6 py-3">IP Addresses (/30)</th>
+                                    <th class="px-6 py-3">Specs</th>
+                                    <th class="px-6 py-3 text-right">Actions</th>
+                                </tr>
+                            </thead>
+                            <tbody id="vm-table-body" class="divide-y divide-slate-100"></tbody>
+                        </table>
+                    </div>
+                    <div id="empty-state" class="hidden text-center py-10">
+                        <p class="text-sm text-slate-500">No microVMs running.</p>
+                    </div>
                 </div>
-                <div class="overflow-x-auto">
-                    <table class="w-full text-sm text-left">
-                        <thead class="text-xs text-slate-500 uppercase bg-slate-50 border-b border-slate-200">
-                            <tr>
-                                <th class="px-6 py-3">ID / Net</th>
-                                <th class="px-6 py-3">Status</th>
-                                <th class="px-6 py-3">IP Addresses (/30)</th>
-                                <th class="px-6 py-3">Specs</th>
-                                <th class="px-6 py-3 text-right">Actions</th>
-                            </tr>
-                        </thead>
-                        <tbody id="vm-table-body" class="divide-y divide-slate-100">
-                            <!-- Populated by JS -->
-                        </tbody>
-                    </table>
-                </div>
-                <!-- Empty State -->
-                <div id="empty-state" class="hidden text-center py-12">
-                    <svg class="mx-auto h-12 w-12 text-slate-300" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1" d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 002-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10" />
-                    </svg>
-                    <p class="mt-4 text-sm text-slate-500">No microVMs running.</p>
+
+                <!-- Network Routing Table / Microsegmentation -->
+                <div class="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
+                    <div class="px-6 py-4 border-b border-slate-200 bg-slate-50">
+                        <h2 class="text-lg font-semibold text-slate-800">Software-Defined Routing Table</h2>
+                        <p class="text-xs text-slate-500 mt-0.5">Explicitly route traffic between VMs in the same project</p>
+                    </div>
+
+                    <div class="p-6">
+                        <!-- Connect Link Form -->
+                        <form id="link-form" class="flex flex-wrap items-center gap-3 pb-6 border-b border-slate-100">
+                            <div class="flex-1 min-w-[140px]">
+                                <label class="block text-xs font-medium text-slate-600 mb-1">Source VM</label>
+                                <select id="link-vm1" required class="w-full border border-slate-300 rounded-md px-3 py-1.5 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-blue-500"></select>
+                            </div>
+                            <div class="pt-5 text-slate-400 font-bold">⟷</div>
+                            <div class="flex-1 min-w-[140px]">
+                                <label class="block text-xs font-medium text-slate-600 mb-1">Destination VM</label>
+                                <select id="link-vm2" required class="w-full border border-slate-300 rounded-md px-3 py-1.5 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-blue-500"></select>
+                            </div>
+                            <div class="pt-5">
+                                <button type="submit" id="link-btn" class="bg-blue-600 hover:bg-blue-700 text-white font-medium px-4 py-1.5 rounded-md text-sm transition-colors">
+                                    Bridge Link
+                                </button>
+                            </div>
+                        </form>
+
+                        <!-- Active Links List -->
+                        <div class="mt-4">
+                            <h3 class="text-xs font-semibold uppercase tracking-wider text-slate-400 mb-3">Active Interconnects</h3>
+                            <div id="links-container" class="space-y-2">
+                                <p class="text-xs text-slate-400 italic">No custom routes active. VMs are currently isolated.</p>
+                            </div>
+                        </div>
+                    </div>
                 </div>
             </div>
         </div>
