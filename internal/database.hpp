@@ -47,6 +47,10 @@ public:
             );
         )";
         execute_query(ddl);
+
+        // Safe alterations to add new columns if they don't exist
+        sqlite3_exec(db, "ALTER TABLE vms ADD COLUMN http_exposed INTEGER DEFAULT 0;", nullptr, nullptr, nullptr);
+        sqlite3_exec(db, "ALTER TABLE vms ADD COLUMN https_exposed INTEGER DEFAULT 0;", nullptr, nullptr, nullptr);
     }
 
     ~Database() { if (db) sqlite3_close(db); }
@@ -55,6 +59,7 @@ public:
         int slot; pid_t pid; std::string status;
         int vcpus; int mem_mib; std::string guest_ip; std::string host_ip;
         std::string tap_name; bool ssh_exposed; int host_port;
+        bool http_exposed; bool https_exposed;
         std::string socket_path; std::string project_name;
     };
 
@@ -62,7 +67,7 @@ public:
 
     std::vector<DBRow> get_all_vms() {
         std::vector<DBRow> rows;
-        const char* sql = "SELECT slot_id, pid, status, vcpus, mem_mib, guest_ip, host_ip, tap_name, ssh_exposed, host_port, project_name FROM vms;";
+        const char* sql = "SELECT slot_id, pid, status, vcpus, mem_mib, guest_ip, host_ip, tap_name, ssh_exposed, host_port, project_name, http_exposed, https_exposed FROM vms;";
         sqlite3_stmt* stmt;
         
         if (sqlite3_prepare_v2(db, sql, -1, &stmt, nullptr) == SQLITE_OK) {
@@ -79,6 +84,8 @@ public:
                 r.ssh_exposed = sqlite3_column_int(stmt, 8);
                 r.host_port = sqlite3_column_int(stmt, 9);
                 r.project_name = reinterpret_cast<const char*>(sqlite3_column_text(stmt, 10));
+                r.http_exposed = sqlite3_column_int(stmt, 11);
+                r.https_exposed = sqlite3_column_int(stmt, 12);
                 r.socket_path = "/tmp/cryo_" + std::to_string(r.slot) + ".socket";
                 rows.push_back(r);
             }
@@ -99,8 +106,8 @@ public:
 
     void insert_vm(int slot, pid_t pid, const std::string& status, int vcpus, int mem,
                    const std::string& g_ip, const std::string& h_ip, const std::string& tap,
-                   bool ssh, int port, const std::string& project) {
-        const char* sql = "INSERT INTO vms VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);";
+                   bool ssh, int port, const std::string& project, bool http_exposed, bool https_exposed) {
+        const char* sql = "INSERT INTO vms (slot_id, pid, status, vcpus, mem_mib, guest_ip, host_ip, tap_name, ssh_exposed, host_port, project_name, http_exposed, https_exposed) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);";
         sqlite3_stmt* stmt;
         sqlite3_prepare_v2(db, sql, -1, &stmt, nullptr);
         
@@ -113,6 +120,8 @@ public:
         sqlite3_bind_int(stmt, 9, ssh ? 1 : 0);
         if (ssh) sqlite3_bind_int(stmt, 10, port); else sqlite3_bind_null(stmt, 10);
         sqlite3_bind_text(stmt, 11, project.c_str(), -1, SQLITE_TRANSIENT);
+        sqlite3_bind_int(stmt, 12, http_exposed ? 1 : 0);
+        sqlite3_bind_int(stmt, 13, https_exposed ? 1 : 0);
 
         sqlite3_step(stmt); sqlite3_finalize(stmt);
     }

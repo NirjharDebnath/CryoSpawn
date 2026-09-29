@@ -66,6 +66,8 @@ function renderTable(vms) {
                 ${(() => {
                     if (vm.status === 'running') 
                         return `<span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-green-100 text-green-800 border border-green-200">Running</span>`;
+                    if (vm.status === 'hibernated') 
+                        return `<span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-purple-100 text-purple-800 border border-purple-200">Hibernated ❄️</span>`;
                     if (vm.status === 'booting') 
                         return `<span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-blue-100 text-blue-800 border border-blue-200 status-booting">Booting...</span>`;
                     return `<span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-gray-100 text-gray-800 border border-gray-200">${vm.status}</span>`;
@@ -82,14 +84,34 @@ function renderTable(vms) {
                 </div>
                 ${vm.ssh_exposed ? `
                     <div class="mt-1 text-xs bg-slate-100 p-1 rounded font-mono text-blue-600 inline-block select-all">
-                        ssh root@${vm.host_lan_ip} -p${vm.host_port}
+                        ssh root@${vm.host_lan_ip} -p${2200 + vm.id}
+                    </div><br>
+                ` : ''}
+                ${vm.http_exposed ? `
+                    <div class="mt-1 text-xs bg-slate-100 p-1 rounded font-mono text-green-600 inline-block select-all">
+                        http://${vm.host_lan_ip}:${8000 + vm.id}
+                    </div><br>
+                ` : ''}
+                ${vm.https_exposed ? `
+                    <div class="mt-1 text-xs bg-slate-100 p-1 rounded font-mono text-green-600 inline-block select-all">
+                        https://${vm.host_lan_ip}:${8400 + vm.id}
                     </div>
                 ` : ''}
             </td>
             <td class="px-6 py-4 whitespace-nowrap text-sm text-slate-600">
                 ${vm.vcpus} vCPU • ${vm.mem_mib} MB
             </td>
-            <td class="px-6 py-4 whitespace-nowrap text-right">
+            <td class="px-6 py-4 whitespace-nowrap text-right space-x-2">
+                ${vm.status === 'running' ? `
+                    <button onclick="hibernateVM(${vm.id})" class="text-purple-600 hover:text-purple-800 hover:bg-purple-50 px-3 py-1 rounded transition-colors text-sm font-medium">
+                        Hibernate
+                    </button>
+                ` : ''}
+                ${vm.status === 'hibernated' ? `
+                    <button onclick="wakeVM(${vm.id})" class="text-green-600 hover:text-green-800 hover:bg-green-50 px-3 py-1 rounded transition-colors text-sm font-medium">
+                        Wake
+                    </button>
+                ` : ''}
                 <button onclick="deleteVM(${vm.id})" class="text-red-500 hover:text-red-700 hover:bg-red-50 px-3 py-1 rounded transition-colors text-sm font-medium">
                     Destroy
                 </button>
@@ -158,7 +180,9 @@ spawnForm.addEventListener('submit', async (e) => {
         project: document.getElementById('project-name').value.trim() || 'default',
         vcpus: parseInt(document.getElementById('vcpus').value),
         mem_mib: parseInt(document.getElementById('ram').value),
-        expose_ssh: document.getElementById('expose-ssh').checked
+        expose_ssh: document.getElementById('expose-ssh').checked,
+        expose_http: document.getElementById('expose-http').checked,
+        expose_https: document.getElementById('expose-https').checked
     };
 
     try {
@@ -212,6 +236,26 @@ async function deleteVM(id) {
         fetchData();
     } catch {
         alert("Failed to terminate VM.");
+    }
+}
+
+// Hibernate VM
+async function hibernateVM(id) {
+    try {
+        await fetch(`${API_URL}/${id}/hibernate`, { method: 'POST' });
+        fetchData();
+    } catch {
+        alert("Failed to hibernate VM.");
+    }
+}
+
+// Wake VM
+async function wakeVM(id) {
+    try {
+        await fetch(`${API_URL}/${id}/wake`, { method: 'POST' });
+        fetchData();
+    } catch {
+        alert("Failed to wake VM.");
     }
 }
 

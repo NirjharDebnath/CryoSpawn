@@ -30,6 +30,8 @@ struct MicroVM {
     int vcpus = 1; 
     int mem_mib = 512; 
     bool ssh_exposed = false; 
+    bool http_exposed = false;
+    bool https_exposed = false;
     int host_port = 0;
     std::string project_name = "";
 };
@@ -57,6 +59,26 @@ private:
         teardown_cryo_network(vm.tap_name);
         if (vm.ssh_exposed) unexpose_vm_port(active_iface, vm.host_port, vm.ip, 22);
         unlink(vm.socket_path.c_str());
+
+        // Delete the unique rootfs disk for this VM to free SSD space
+        std::string base_dir = "/home/nirjhar/Python Codes/Einstein/CryoSpawn/instances";
+        std::string vm_rootfs = base_dir + "/vm_" + std::to_string(vm.id) + "_rootfs.ext4";
+        std::string vm_snap = base_dir + "/vm_" + std::to_string(vm.id) + "_state.snap";
+        std::string vm_mem = base_dir + "/vm_" + std::to_string(vm.id) + "_mem.ram";
+
+        if (std::filesystem::exists(vm_rootfs)) {
+            std::filesystem::remove(vm_rootfs);
+            std::cout << "[+] Deleted VM disk to free SSD space: " << vm_rootfs << "\n";
+        }
+        if (std::filesystem::exists(vm_snap)) {
+            std::filesystem::remove(vm_snap);
+            std::cout << "[+] Deleted VM state snapshot: " << vm_snap << "\n";
+        }
+        if (std::filesystem::exists(vm_mem)) {
+            std::filesystem::remove(vm_mem);
+            std::cout << "[+] Deleted VM RAM snapshot: " << vm_mem << "\n";
+        }
+
         db.remove_vm(vm.id);
     }
 
@@ -75,7 +97,9 @@ private:
                 vm.ip = r.guest_ip; 
                 vm.host_ip = r.host_ip;
                 vm.tap_name = r.tap_name; 
-                vm.ssh_exposed = r.ssh_exposed; 
+                vm.ssh_exposed = r.ssh_exposed;
+                vm.http_exposed = r.http_exposed;
+                vm.https_exposed = r.https_exposed;
                 vm.host_port = r.host_port;
                 vm.project_name = r.project_name; 
                 vm.socket_path = r.socket_path;
@@ -86,6 +110,8 @@ private:
                 stale_vm.id = r.slot; 
                 stale_vm.tap_name = r.tap_name;
                 stale_vm.ssh_exposed = r.ssh_exposed; 
+                stale_vm.http_exposed = r.http_exposed;
+                stale_vm.https_exposed = r.https_exposed;
                 stale_vm.host_port = r.host_port;
                 stale_vm.ip = r.guest_ip; 
                 stale_vm.socket_path = r.socket_path;
@@ -102,8 +128,14 @@ private:
                     std::lock_guard<std::mutex> lock(mtx);
                     if (pid_to_slot.find(pid) != pid_to_slot.end()) {
                         int slot = pid_to_slot[pid];
-                        cleanup_vm_resources(vms[slot]);
-                        vms.erase(slot); pid_to_slot.erase(pid);
+                        if (vms[slot].status == "hibernated") {
+                            // Leave resources intact, just clear PID
+                            vms[slot].pid = 0;
+                            pid_to_slot.erase(pid);
+                        } else {
+                            cleanup_vm_resources(vms[slot]);
+                            vms.erase(slot); pid_to_slot.erase(pid);
+                        }
                     }
                 }
                 std::vector<int> dead_adopted;
@@ -130,11 +162,12 @@ public:
     VMManager() {
         active_iface = get_default_interface();
         init_cryo_firewall_baseline(active_iface);
+        std::filesystem::create_directories("/home/nirjhar/Python Codes/Einstein/CryoSpawn/instances");
         reconcile_state(); 
         start_reaper();
     }
 
-    MicroVM create_vm(int vcpus, int mem_mib, bool expose_ssh, const std::string& project) {
+    MicroVM create_vm(int vcpus, int mem_mib, bool expose_ssh, bool expose_http, bool expose_https, const std::string& project) {
         std::lock_guard<std::mutex> lock(mtx);
         int slot = db.get_next_free_slot(); int base = slot * 4;
         
@@ -144,11 +177,14 @@ public:
         vm.mac = generate_mac(slot); vm.tap_name = "cryo" + std::to_string(slot);
         vm.socket_path = "/tmp/cryo_" + std::to_string(slot) + ".socket";
         vm.vcpus = vcpus; vm.mem_mib = mem_mib; vm.status = "booting";
-        vm.ssh_exposed = expose_ssh; vm.project_name = project;
+        vm.ssh_exposed = expose_ssh; 
+        vm.http_exposed = expose_http;
+        vm.https_exposed = expose_https;
+        vm.project_name = project;
         if (expose_ssh) vm.host_port = 2200 + slot;
 
         setup_cryo_network(vm.tap_name, vm.host_ip, active_iface);
-        if (expose_ssh) expose_vm_port(active_iface, vm.host_port, vm.ip, 22);
+        // Bypassing iptables to use Ghost Proxy!
 
         unlink(vm.socket_path.c_str());
         pid_t pid = fork();
@@ -161,7 +197,7 @@ public:
         }
 
         vm.pid = pid; vms[vm.id] = vm; pid_to_slot[pid] = vm.id;
-        db.insert_vm(slot, pid, "booting", vcpus, mem_mib, vm.ip, vm.host_ip, vm.tap_name, expose_ssh, vm.host_port, project);
+        db.insert_vm(slot, pid, "booting", vcpus, mem_mib, vm.ip, vm.host_ip, vm.tap_name, expose_ssh, vm.host_port, project, expose_http, expose_https);
         return vm;
     }
 
@@ -184,7 +220,21 @@ public:
         std::string boot_payload = "{\"kernel_image_path\": \"" + kernel + "\", \"boot_args\": \"" + boot_args + "\"}";
         if (!send_firecracker_put(vm.socket_path, "/boot-source", boot_payload)) { terminate_vm(id); return false; }
 
-        std::string drive_payload = "{\"drive_id\": \"rootfs\", \"path_on_host\": \"" + rootfs + "\", \"is_root_device\": true, \"is_read_only\": false}";
+        // 1. Create a unique rootfs copy for this VM
+        std::filesystem::path base_path(rootfs);
+        std::filesystem::path vm_rootfs = std::filesystem::path("/home/nirjhar/Python Codes/Einstein/CryoSpawn/instances") / ("vm_" + std::to_string(id) + "_rootfs.ext4");
+        
+        try {
+            std::cout << "[*] Cloning disk image for VM " << id << "...\n";
+            std::filesystem::copy(base_path, vm_rootfs, std::filesystem::copy_options::overwrite_existing);
+        } catch (const std::exception& e) {
+            std::cerr << "[-] Failed to clone rootfs: " << e.what() << "\n";
+            terminate_vm(id);
+            return false;
+        }
+
+        // 2. Tell Firecracker to use the NEW instance disk, not the base template
+        std::string drive_payload = "{\"drive_id\": \"rootfs\", \"path_on_host\": \"" + vm_rootfs.string() + "\", \"is_root_device\": true, \"is_read_only\": false}";
         if (!send_firecracker_put(vm.socket_path, "/drives/rootfs", drive_payload)) { terminate_vm(id); return false; }
 
         std::string net_payload = "{\"iface_id\": \"eth0\", \"guest_mac\": \"" + vm.mac + "\", \"host_dev_name\": \"" + vm.tap_name + "\"}";
@@ -202,7 +252,91 @@ public:
     void terminate_vm(int id) {
         std::lock_guard<std::mutex> lock(mtx);
         if (vms.find(id) == vms.end()) return;
-        kill(vms[id].pid, SIGTERM);
+        
+        if (vms[id].pid > 0) {
+            kill(vms[id].pid, SIGTERM);
+        } else if (vms[id].status == "hibernated") {
+            cleanup_vm_resources(vms[id]);
+            vms.erase(id);
+        }
+    }
+
+    bool hibernate_vm(int id) {
+        std::string snap_path = "/home/nirjhar/Python Codes/Einstein/CryoSpawn/instances/vm_" + std::to_string(id) + "_state.snap";
+        std::string mem_path = "/home/nirjhar/Python Codes/Einstein/CryoSpawn/instances/vm_" + std::to_string(id) + "_mem.ram";
+        
+        {
+            std::lock_guard<std::mutex> lock(mtx);
+            if (vms.find(id) == vms.end() || vms[id].status != "running") return false;
+            
+            // 1. Pause VM execution
+            if (!send_firecracker_patch(vms[id].socket_path, "/vm", "{\"state\": \"Paused\"}")) return false;
+            
+            // 2. Dump RAM and CPU state to disk
+            std::string snap_payload = "{\"snapshot_type\": \"Full\", \"snapshot_path\": \"" + snap_path + "\", \"mem_file_path\": \"" + mem_path + "\"}";
+            if (!send_firecracker_put(vms[id].socket_path, "/snapshot/create", snap_payload)) return false;
+            
+            // 3. Mark as hibernated BEFORE killing, so Reaper doesn't delete the network/disk!
+            vms[id].status = "hibernated"; 
+            db.update_status(id, "hibernated");
+            
+            // 4. Kill the Firecracker process to free host RAM
+            kill(vms[id].pid, SIGTERM);
+        }
+        return true;
+    }
+
+    bool wake_vm(int id) {
+        MicroVM vm;
+        {
+            std::lock_guard<std::mutex> lock(mtx);
+            if (vms.find(id) == vms.end() || vms[id].status != "hibernated") return false;
+            vms[id].status = "waking"; // Prevent race condition from concurrent Ghost Proxy threads!
+            db.update_status(id, "waking");
+            vm = vms[id];
+        }
+
+        std::string snap_path = "/home/nirjhar/Python Codes/Einstein/CryoSpawn/instances/vm_" + std::to_string(id) + "_state.snap";
+        std::string mem_path = "/home/nirjhar/Python Codes/Einstein/CryoSpawn/instances/vm_" + std::to_string(id) + "_mem.ram";
+
+        // 1. Start a fresh Firecracker process
+        unlink(vm.socket_path.c_str());
+        pid_t pid = fork();
+        if (pid == 0) {
+            setsid();
+            int dev_null = open("/dev/null", O_RDWR);
+            dup2(dev_null, STDOUT_FILENO); dup2(dev_null, STDERR_FILENO); dup2(dev_null, STDIN_FILENO); close(dev_null);
+            execlp("firecracker", "firecracker", "--api-sock", vm.socket_path.c_str(), (char*)NULL);
+            _exit(1);
+        }
+
+        {
+            std::lock_guard<std::mutex> lock(mtx);
+            vms[id].pid = pid;
+            pid_to_slot[pid] = id;
+        }
+
+        // Wait for socket
+        bool ready = false;
+        for (int i = 0; i < 30; ++i) {
+            if (access(vm.socket_path.c_str(), F_OK) == 0) { ready = true; break; }
+            std::this_thread::sleep_for(std::chrono::milliseconds(50));
+        }
+        if (!ready) return false;
+
+        // 2. Load the Snapshot back into memory
+        std::string load_payload = "{\"snapshot_path\": \"" + snap_path + "\", \"mem_file_path\": \"" + mem_path + "\"}";
+        if (!send_firecracker_put(vm.socket_path, "/snapshot/load", load_payload)) { terminate_vm(id); return false; }
+
+        // 3. Un-pause the VM
+        if (!send_firecracker_patch(vm.socket_path, "/vm", "{\"state\": \"Resumed\"}")) { terminate_vm(id); return false; }
+
+        {
+            std::lock_guard<std::mutex> lock(mtx);
+            vms[id].status = "running";
+            db.update_status(id, "running");
+        }
+        return true;
     }
 
     std::vector<MicroVM> list_vms() {
