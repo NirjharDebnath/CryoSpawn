@@ -83,18 +83,18 @@ function renderTable(vms) {
                     <span class="text-xs font-mono text-slate-500">${vm.host_ip}</span>
                 </div>
                 ${vm.ssh_exposed ? `
-                    <div class="mt-1 text-xs bg-slate-100 p-1 rounded font-mono text-blue-600 inline-block select-all">
-                        ssh root@${vm.host_lan_ip} -p${2200 + vm.id}
+                    <div class="mt-1 text-xs bg-slate-100 p-1 rounded font-mono text-blue-600 inline-block select-all" title="SSH via Unix Socket ProxyCommand">
+                        ssh -o ProxyCommand="nc -U /tmp/cryo_vm_${vm.id}_22.sock" root@localhost
                     </div><br>
                 ` : ''}
                 ${vm.http_exposed ? `
-                    <div class="mt-1 text-xs bg-slate-100 p-1 rounded font-mono text-green-600 inline-block select-all">
-                        http://${vm.host_lan_ip}:${8000 + vm.id}
+                    <div class="mt-1 text-xs bg-slate-100 p-1 rounded font-mono text-green-600 inline-block select-all" title="Nginx Ingress">
+                        http://vm${vm.id}.cryo
                     </div><br>
                 ` : ''}
                 ${vm.https_exposed ? `
-                    <div class="mt-1 text-xs bg-slate-100 p-1 rounded font-mono text-green-600 inline-block select-all">
-                        https://${vm.host_lan_ip}:${8400 + vm.id}
+                    <div class="mt-1 text-xs bg-slate-100 p-1 rounded font-mono text-green-600 inline-block select-all" title="Nginx Ingress">
+                        https://vm${vm.id}.cryo
                     </div>
                 ` : ''}
             </td>

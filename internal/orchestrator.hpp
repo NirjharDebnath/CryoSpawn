@@ -79,6 +79,11 @@ private:
             std::cout << "[+] Deleted VM RAM snapshot: " << vm_mem << "\n";
         }
 
+        // Clean up Unix Domain Sockets for Ghost Proxy
+        unlink(("/tmp/cryo_vm_" + std::to_string(vm.id) + "_22.sock").c_str());
+        unlink(("/tmp/cryo_vm_" + std::to_string(vm.id) + "_80.sock").c_str());
+        unlink(("/tmp/cryo_vm_" + std::to_string(vm.id) + "_443.sock").c_str());
+
         db.remove_vm(vm.id);
     }
 
@@ -104,6 +109,7 @@ private:
                 vm.project_name = r.project_name; 
                 vm.socket_path = r.socket_path;
                 vms[r.slot] = vm; 
+                pid_to_slot[r.pid] = r.slot;
             } else {
                 std::cout << "[-] Cleaning up stale DB entry for VM " << r.slot << "\n";
                 MicroVM stale_vm; 
@@ -142,8 +148,9 @@ private:
                 {
                     std::lock_guard<std::mutex> lock(mtx);
                     for (auto& pair : vms) {
+                        if (pair.second.status == "hibernated") continue; // Skip hibernated VMs!
                         if (pid_to_slot.find(pair.second.pid) == pid_to_slot.end()) {
-                            if (kill(pair.second.pid, 0) != 0) dead_adopted.push_back(pair.first);
+                            if (pair.second.pid > 0 && kill(pair.second.pid, 0) != 0) dead_adopted.push_back(pair.first);
                         }
                     }
                 }
@@ -365,3 +372,4 @@ public:
 
     std::vector<Database::LinkRow> get_all_links() { return db.get_all_links(); }
 };
+

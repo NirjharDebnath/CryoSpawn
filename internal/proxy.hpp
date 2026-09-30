@@ -66,23 +66,33 @@ inline void handle_proxy_client(int client_sock, std::string vm_ip, int vm_port,
     t2.detach();
 }
 
-inline void run_ghost_proxy(int host_port, std::string vm_ip, int vm_port, int vm_id, WakeCallback wake_fn, StatusCallback status_fn) {
-    int server_fd = socket(AF_INET, SOCK_STREAM, 0);
-    int opt = 1;
-    setsockopt(server_fd, SOL_SOCKET, SO_REUSEADDR | SO_REUSEPORT, &opt, sizeof(opt));
+#include <sys/un.h>
+
+inline void run_ghost_proxy(const std::string& uds_path, std::string vm_ip, int vm_port, int vm_id, WakeCallback wake_fn, StatusCallback status_fn) {
+    int server_fd = socket(AF_UNIX, SOCK_STREAM, 0);
+    if (server_fd < 0) {
+        std::cerr << "[-] Ghost Proxy failed to create Unix socket for VM " << vm_id << "\n";
+        return;
+    }
     
-    struct sockaddr_in address;
-    address.sin_family = AF_INET;
-    address.sin_addr.s_addr = INADDR_ANY;
-    address.sin_port = htons(host_port);
+    struct sockaddr_un address;
+    address.sun_family = AF_UNIX;
+    std::strncpy(address.sun_path, uds_path.c_str(), sizeof(address.sun_path) - 1);
+
+    // Ensure stale socket files are removed before binding
+    unlink(uds_path.c_str());
 
     if (bind(server_fd, (struct sockaddr*)&address, sizeof(address)) < 0) {
-        std::cerr << "[-] Ghost Proxy bind failed on port " << host_port << "\n";
+        std::cerr << "[-] Ghost Proxy bind failed on " << uds_path << "\n";
+        close(server_fd);
         return;
     }
 
+    // Allow nginx (or any user) to write to this socket
+    chmod(uds_path.c_str(), 0666);
+
     listen(server_fd, 10);
-    std::cout << "[+] Ghost Proxy listening on Host Port " << host_port << " -> forwarding to VM " << vm_id << " (" << vm_ip << ":" << vm_port << ")\n";
+    std::cout << "[+] Ghost Proxy listening on " << uds_path << " -> forwarding to VM " << vm_id << " (" << vm_ip << ":" << vm_port << ")\n";
 
     while (true) {
         int client_sock = accept(server_fd, nullptr, nullptr);

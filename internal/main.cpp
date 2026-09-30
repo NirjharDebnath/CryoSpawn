@@ -16,6 +16,28 @@ int main() {
     VMManager manager;
     httplib::Server svr;
 
+    // Define wake and status functions for the proxies
+    auto wake_fn = [&manager](int vid) { return manager.wake_vm(vid); };
+    auto status_fn = [&manager](int vid) {
+        for (auto& v : manager.list_vms()) {
+            if (v.id == vid && v.status == "hibernated") return true;
+        }
+        return false;
+    };
+
+    // Restore Ghost Proxies for all adopted VMs on startup
+    for (const auto& vm : manager.list_vms()) {
+        if (vm.ssh_exposed) {
+            std::thread(run_ghost_proxy, "/tmp/cryo_vm_" + std::to_string(vm.id) + "_22.sock", vm.ip, 22, vm.id, wake_fn, status_fn).detach();
+        }
+        if (vm.http_exposed) {
+            std::thread(run_ghost_proxy, "/tmp/cryo_vm_" + std::to_string(vm.id) + "_80.sock", vm.ip, 80, vm.id, wake_fn, status_fn).detach();
+        }
+        if (vm.https_exposed) {
+            std::thread(run_ghost_proxy, "/tmp/cryo_vm_" + std::to_string(vm.id) + "_443.sock", vm.ip, 443, vm.id, wake_fn, status_fn).detach();
+        }
+    }
+
     svr.Get("/api/vms", [&](const httplib::Request& req, httplib::Response& res) {
         std::string lan_ip = get_lan_ip(manager.active_iface);
         json response_json = json::array();
@@ -64,14 +86,15 @@ int main() {
             };
 
             // Wire the Ghost Proxies
+            // Wire the Ghost Proxies using Unix Domain Sockets
             if (vm.ssh_exposed) {
-                std::thread(run_ghost_proxy, 2200 + vm.id, vm.ip, 22, vm.id, wake_fn, status_fn).detach();
+                std::thread(run_ghost_proxy, "/tmp/cryo_vm_" + std::to_string(vm.id) + "_22.sock", vm.ip, 22, vm.id, wake_fn, status_fn).detach();
             }
             if (vm.http_exposed) {
-                std::thread(run_ghost_proxy, 8000 + vm.id, vm.ip, 80, vm.id, wake_fn, status_fn).detach();
+                std::thread(run_ghost_proxy, "/tmp/cryo_vm_" + std::to_string(vm.id) + "_80.sock", vm.ip, 80, vm.id, wake_fn, status_fn).detach();
             }
             if (vm.https_exposed) {
-                std::thread(run_ghost_proxy, 8400 + vm.id, vm.ip, 443, vm.id, wake_fn, status_fn).detach();
+                std::thread(run_ghost_proxy, "/tmp/cryo_vm_" + std::to_string(vm.id) + "_443.sock", vm.ip, 443, vm.id, wake_fn, status_fn).detach();
             }
 
             json response = { {"id", vm.id}, {"ip", vm.ip}, {"status", "booting"} };
@@ -143,8 +166,9 @@ int main() {
                 return false;
             };
 
-            std::thread(run_ghost_proxy, host_port, vm_ip, vm_port, id, wake_fn, status_fn).detach();
-            res.set_content(R"({"status": "proxy_started"})", "application/json");
+            std::string uds_path = "/tmp/cryo_vm_" + std::to_string(id) + "_" + std::to_string(vm_port) + ".sock";
+            std::thread(run_ghost_proxy, uds_path, vm_ip, vm_port, id, wake_fn, status_fn).detach();
+            res.set_content(R"({"status": "proxy_started", "uds": ")" + uds_path + R"("})", "application/json");
 
         } catch (const std::exception& e) {
             res.status = 400;
