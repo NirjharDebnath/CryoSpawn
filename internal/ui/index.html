@@ -140,6 +140,41 @@
                         </div>
                     </div>
                 </div>
+
+                <!-- Elastic Storage Volumes -->
+                <div class="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden mt-6">
+                    <div class="px-6 py-4 border-b border-slate-200 bg-slate-50 flex justify-between items-center">
+                        <div>
+                            <h2 class="text-lg font-semibold text-slate-800">Elastic Storage Volumes</h2>
+                            <p class="text-xs text-slate-500 mt-0.5">Persistent block storage drives for databases and file servers</p>
+                        </div>
+                    </div>
+
+                    <div class="p-6">
+                        <form id="volume-form" class="flex flex-wrap items-center gap-3 pb-6 border-b border-slate-100">
+                            <div class="flex-1 min-w-[140px]">
+                                <label class="block text-xs font-medium text-slate-600 mb-1">Volume Name</label>
+                                <input type="text" id="vol-name" placeholder="e.g. pg_data" required class="w-full border border-slate-300 rounded-md px-3 py-1.5 text-sm">
+                            </div>
+                            <div class="flex-1 min-w-[140px]">
+                                <label class="block text-xs font-medium text-slate-600 mb-1">Size (GB)</label>
+                                <input type="number" id="vol-size" placeholder="10" min="1" max="1000" required class="w-full border border-slate-300 rounded-md px-3 py-1.5 text-sm">
+                            </div>
+                            <div class="pt-5">
+                                <button type="submit" id="vol-btn" class="bg-indigo-600 hover:bg-indigo-700 text-white font-medium px-4 py-1.5 rounded-md text-sm transition-colors">
+                                    Create Volume
+                                </button>
+                            </div>
+                        </form>
+
+                        <!-- Volumes List -->
+                        <div class="mt-4">
+                            <div id="volumes-container" class="space-y-3">
+                                <p class="text-xs text-slate-400 italic">No volumes created yet.</p>
+                            </div>
+                        </div>
+                    </div>
+                </div>
             </div>
         </div>
     </div>

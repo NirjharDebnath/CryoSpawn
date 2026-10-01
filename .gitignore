@@ -1,4 +1,9 @@
 .vscode
+.venv
 rootfs
 vmlinux
 instances
+downloads
+volumes
+squashfs-root
+ubuntu-24.04.id_rsa

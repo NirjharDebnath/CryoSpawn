@@ -45,6 +45,12 @@ public:
                 vm2_id INTEGER NOT NULL,
                 UNIQUE(vm1_id, vm2_id)
             );
+            CREATE TABLE IF NOT EXISTS volumes (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                name TEXT NOT NULL,
+                size_gb INTEGER NOT NULL,
+                attached_vm_id INTEGER DEFAULT -1
+            );
         )";
         execute_query(ddl);
 
@@ -130,6 +136,14 @@ public:
         execute_query("UPDATE vms SET status = '" + status + "' WHERE slot_id = " + std::to_string(slot) + ";");
     }
 
+    void update_vm_ports(int slot, bool ssh, bool http, bool https) {
+        std::string sql = "UPDATE vms SET ssh_exposed = " + std::to_string(ssh ? 1 : 0) + 
+                          ", http_exposed = " + std::to_string(http ? 1 : 0) + 
+                          ", https_exposed = " + std::to_string(https ? 1 : 0) + 
+                          " WHERE slot_id = " + std::to_string(slot) + ";";
+        execute_query(sql);
+    }
+
     void remove_vm(int slot) {
         execute_query("DELETE FROM vms WHERE slot_id = " + std::to_string(slot) + ";");
         execute_query("DELETE FROM network_links WHERE vm1_id = " + std::to_string(slot) + " OR vm2_id = " + std::to_string(slot) + ";");
@@ -153,5 +167,42 @@ public:
             sqlite3_finalize(stmt);
         }
         return links;
+    }
+
+    // --- Volumes ---
+    int insert_volume(const std::string& name, int size_gb) {
+        std::string sql = "INSERT INTO volumes (name, size_gb) VALUES ('" + name + "', " + std::to_string(size_gb) + ");";
+        execute_query(sql);
+        return sqlite3_last_insert_rowid(db);
+    }
+
+    void remove_volume(int id) {
+        execute_query("DELETE FROM volumes WHERE id = " + std::to_string(id) + ";");
+    }
+
+    void attach_volume(int vol_id, int vm_id) {
+        execute_query("UPDATE volumes SET attached_vm_id = " + std::to_string(vm_id) + " WHERE id = " + std::to_string(vol_id) + ";");
+    }
+
+    void detach_volume(int vol_id) {
+        execute_query("UPDATE volumes SET attached_vm_id = -1 WHERE id = " + std::to_string(vol_id) + ";");
+    }
+
+    struct VolumeRow { int id; std::string name; int size_gb; int attached_vm_id; };
+
+    std::vector<VolumeRow> get_volumes() {
+        std::vector<VolumeRow> vols; sqlite3_stmt* stmt;
+        if (sqlite3_prepare_v2(db, "SELECT id, name, size_gb, attached_vm_id FROM volumes;", -1, &stmt, nullptr) == SQLITE_OK) {
+            while (sqlite3_step(stmt) == SQLITE_ROW) {
+                vols.push_back({
+                    sqlite3_column_int(stmt, 0),
+                    reinterpret_cast<const char*>(sqlite3_column_text(stmt, 1)),
+                    sqlite3_column_int(stmt, 2),
+                    sqlite3_column_int(stmt, 3)
+                });
+            }
+            sqlite3_finalize(stmt);
+        }
+        return vols;
     }
 };

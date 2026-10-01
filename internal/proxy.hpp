@@ -67,6 +67,27 @@ inline void handle_proxy_client(int client_sock, std::string vm_ip, int vm_port,
 }
 
 #include <sys/un.h>
+#include <map>
+
+inline std::mutex proxy_registry_mutex;
+inline std::map<std::string, int> active_proxies;
+
+inline void stop_ghost_proxy(const std::string& uds_path) {
+    std::lock_guard<std::mutex> lock(proxy_registry_mutex);
+    if (active_proxies.find(uds_path) != active_proxies.end()) {
+        int fd = active_proxies[uds_path];
+        shutdown(fd, SHUT_RDWR);
+        close(fd);
+        active_proxies.erase(uds_path);
+        unlink(uds_path.c_str());
+        std::cout << "[*] Stopped Ghost Proxy on " << uds_path << "\n";
+    }
+}
+
+inline bool is_ghost_proxy_running(const std::string& uds_path) {
+    std::lock_guard<std::mutex> lock(proxy_registry_mutex);
+    return active_proxies.find(uds_path) != active_proxies.end();
+}
 
 inline void run_ghost_proxy(const std::string& uds_path, std::string vm_ip, int vm_port, int vm_id, WakeCallback wake_fn, StatusCallback status_fn) {
     int server_fd = socket(AF_UNIX, SOCK_STREAM, 0);
@@ -92,13 +113,18 @@ inline void run_ghost_proxy(const std::string& uds_path, std::string vm_ip, int 
     chmod(uds_path.c_str(), 0666);
 
     listen(server_fd, 10);
+    {
+        std::lock_guard<std::mutex> lock(proxy_registry_mutex);
+        active_proxies[uds_path] = server_fd;
+    }
     std::cout << "[+] Ghost Proxy listening on " << uds_path << " -> forwarding to VM " << vm_id << " (" << vm_ip << ":" << vm_port << ")\n";
 
     while (true) {
         int client_sock = accept(server_fd, nullptr, nullptr);
-        if (client_sock >= 0) {
-            // Spawn a handler thread for this user
-            std::thread(handle_proxy_client, client_sock, vm_ip, vm_port, vm_id, wake_fn, status_fn).detach();
+        if (client_sock < 0) {
+            break; // Socket closed, exit thread
         }
+        // Spawn a handler thread for this user
+        std::thread(handle_proxy_client, client_sock, vm_ip, vm_port, vm_id, wake_fn, status_fn).detach();
     }
 }

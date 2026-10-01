@@ -104,9 +104,9 @@ int main() {
         }
     });
 
-    svr.Post(R"(/api/vms/(\d+)/restart)", [&](const httplib::Request& req, httplib::Response& res) {
+    svr.Post(R"(^/api/vms/(\d+)/restart$)", [&](const httplib::Request& req, httplib::Response& res) {
         int id = std::stoi(req.matches[1]);
-        manager.terminate_vm(id);
+        manager.reboot_vm(id, KERNEL_PATH, ROOTFS_PATH);
         std::this_thread::sleep_for(std::chrono::milliseconds(200));
         try {
             MicroVM vm = manager.create_vm(1, 512, false, false, false, "default"); 
@@ -115,12 +115,69 @@ int main() {
         } catch (const std::exception& e) { res.status = 500; res.set_content(json{{"error", e.what()}}.dump(), "application/json"); }
     });
 
-    svr.Delete(R"(/api/vms/(\d+))", [&](const httplib::Request& req, httplib::Response& res) {
-        int id = std::stoi(req.matches[1]); manager.terminate_vm(id);
+    svr.Patch(R"(^/api/vms/(\d+)/ports$)", [&](const httplib::Request& req, httplib::Response& res) {
+        int id = std::stoi(req.matches[1]);
+        try {
+            auto body = json::parse(req.body);
+            bool ssh = body.value("ssh_exposed", false);
+            bool http = body.value("http_exposed", false);
+            bool https = body.value("https_exposed", false);
+
+            manager.update_vm_ports(id, ssh, http, https);
+
+            std::string vm_ip = "";
+            for (auto& v : manager.list_vms()) {
+                if (v.id == id) vm_ip = v.ip;
+            }
+
+            if (vm_ip.empty()) {
+                res.status = 404;
+                res.set_content(R"({"error": "VM not found"})", "application/json");
+                return;
+            }
+
+            auto wake_fn = [&manager](int vid) { return manager.wake_vm(vid); };
+            auto status_fn = [&manager](int vid) {
+                for (auto& v : manager.list_vms()) {
+                    if (v.id == vid && v.status == "hibernated") return true;
+                }
+                return false;
+            };
+
+            std::string uds_ssh = "/tmp/cryo_vm_" + std::to_string(id) + "_22.sock";
+            std::string uds_http = "/tmp/cryo_vm_" + std::to_string(id) + "_80.sock";
+            std::string uds_https = "/tmp/cryo_vm_" + std::to_string(id) + "_443.sock";
+
+            if (ssh && !is_ghost_proxy_running(uds_ssh)) {
+                std::thread(run_ghost_proxy, uds_ssh, vm_ip, 22, id, wake_fn, status_fn).detach();
+            } else if (!ssh && is_ghost_proxy_running(uds_ssh)) {
+                stop_ghost_proxy(uds_ssh);
+            }
+
+            if (http && !is_ghost_proxy_running(uds_http)) {
+                std::thread(run_ghost_proxy, uds_http, vm_ip, 80, id, wake_fn, status_fn).detach();
+            } else if (!http && is_ghost_proxy_running(uds_http)) {
+                stop_ghost_proxy(uds_http);
+            }
+
+            if (https && !is_ghost_proxy_running(uds_https)) {
+                std::thread(run_ghost_proxy, uds_https, vm_ip, 443, id, wake_fn, status_fn).detach();
+            } else if (!https && is_ghost_proxy_running(uds_https)) {
+                stop_ghost_proxy(uds_https);
+            }
+
+            res.set_content(R"({"status": "ports updated"})", "application/json");
+        } catch (const std::exception& e) {
+            res.status = 500; res.set_content(json{{"error", e.what()}}.dump(), "application/json");
+        }
+    });
+
+    svr.Delete(R"(^/api/vms/(\d+)$)", [&](const httplib::Request& req, httplib::Response& res) {
+        int id = std::stoi(req.matches[1]); manager.reboot_vm(id, KERNEL_PATH, ROOTFS_PATH);
         res.set_content(R"({"status": "deleted"})", "application/json");
     });
 
-    svr.Post(R"(/api/vms/(\d+)/hibernate)", [&](const httplib::Request& req, httplib::Response& res) {
+    svr.Post(R"(^/api/vms/(\d+)/hibernate$)", [&](const httplib::Request& req, httplib::Response& res) {
         int id = std::stoi(req.matches[1]);
         if (manager.hibernate_vm(id)) {
             res.set_content(R"({"status": "hibernated"})", "application/json");
@@ -130,7 +187,7 @@ int main() {
         }
     });
 
-    svr.Post(R"(/api/vms/(\d+)/wake)", [&](const httplib::Request& req, httplib::Response& res) {
+    svr.Post(R"(^/api/vms/(\d+)/wake$)", [&](const httplib::Request& req, httplib::Response& res) {
         int id = std::stoi(req.matches[1]);
         if (manager.wake_vm(id)) {
             res.set_content(R"({"status": "running"})", "application/json");
@@ -205,15 +262,90 @@ int main() {
         res.set_content(json{{"status", "unlinked"}}.dump(), "application/json");
     });
 
+    // --- VOLUMES API ---
+    svr.Get("/api/volumes", [&](const httplib::Request& req, httplib::Response& res) {
+        json response = json::array();
+        for (const auto& vol : manager.db.get_volumes()) {
+            response.push_back({
+                {"id", vol.id},
+                {"name", vol.name},
+                {"size_gb", vol.size_gb},
+                {"attached_vm_id", vol.attached_vm_id}
+            });
+        }
+        res.set_content(response.dump(), "application/json");
+    });
+
+    svr.Post("/api/volumes", [&](const httplib::Request& req, httplib::Response& res) {
+        try {
+            auto body = json::parse(req.body);
+            int id = manager.create_volume(body["name"], body["size_gb"]);
+            res.set_content(json{{"status", "created", "id", id}}.dump(), "application/json");
+        } catch (const std::exception& e) {
+            res.status = 500; res.set_content(json{{"error", e.what()}}.dump(), "application/json");
+        }
+    });
+
+    svr.Delete(R"(^/api/volumes/(\d+)$)", [&](const httplib::Request& req, httplib::Response& res) {
+        manager.delete_volume(std::stoi(req.matches[1]));
+        res.set_content(json{{"status", "deleted"}}.dump(), "application/json");
+    });
+
+    svr.Post(R"(^/api/volumes/(\d+)/attach$)", [&](const httplib::Request& req, httplib::Response& res) {
+        try {
+            int vol_id = std::stoi(req.matches[1]);
+            auto body = json::parse(req.body);
+            int vm_id = body["vm_id"];
+            
+            manager.db.attach_volume(vol_id, vm_id);
+            
+            // Check if VM is running, reboot if necessary
+            for (auto& v : manager.list_vms()) {
+                if (v.id == vm_id && v.status == "running") {
+                    manager.reboot_vm(vm_id, KERNEL_PATH, ROOTFS_PATH);
+                    
+                    break;
+                }
+            }
+            res.set_content(json{{"status", "attached"}}.dump(), "application/json");
+        } catch (const std::exception& e) {
+            res.status = 500; res.set_content(json{{"error", e.what()}}.dump(), "application/json");
+        }
+    });
+
+    svr.Post(R"(^/api/volumes/(\d+)/detach$)", [&](const httplib::Request& req, httplib::Response& res) {
+        try {
+            int vol_id = std::stoi(req.matches[1]);
+            int attached_vm = -1;
+            for (const auto& vol : manager.db.get_volumes()) {
+                if (vol.id == vol_id) attached_vm = vol.attached_vm_id;
+            }
+            manager.db.detach_volume(vol_id);
+            
+            if (attached_vm != -1) {
+                for (auto& v : manager.list_vms()) {
+                    if (v.id == attached_vm && v.status == "running") {
+                        manager.reboot_vm(attached_vm, KERNEL_PATH, ROOTFS_PATH);
+                        
+                        break;
+                    }
+                }
+            }
+            res.set_content(json{{"status", "detached"}}.dump(), "application/json");
+        } catch (const std::exception& e) {
+            res.status = 500; res.set_content(json{{"error", e.what()}}.dump(), "application/json");
+        }
+    });
+
     svr.set_post_routing_handler([](const httplib::Request&, httplib::Response& res) {
         res.set_header("Access-Control-Allow-Origin", "*");
-        res.set_header("Access-Control-Allow-Methods", "GET, POST, DELETE, OPTIONS");
+        res.set_header("Access-Control-Allow-Methods", "GET, POST, PATCH, DELETE, OPTIONS");
         res.set_header("Access-Control-Allow-Headers", "Content-Type");
     });
     svr.Options(".*", [](const httplib::Request&, httplib::Response& res) { res.status = 200; });
 
     std::cout << "[*] CryoSpawn Daemon running on http://localhost:8080\n";
-    svr.set_mount_point("/", "./ui");
+    svr.set_mount_point("/", "/home/nirjhar/Python Codes/Einstein/CryoSpawn/internal/ui");
     svr.listen("0.0.0.0", 8080);
     return 0;
 }

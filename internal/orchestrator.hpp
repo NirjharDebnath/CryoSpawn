@@ -41,13 +41,15 @@ private:
     std::unordered_map<int, MicroVM> vms;
     std::unordered_map<pid_t, int> pid_to_slot;
     std::mutex mtx;
-    Database db;
 
     std::string generate_mac(int slot) {
         std::stringstream ss;
         ss << "AA:FC:AC:10:" << std::setfill('0') << std::setw(2) << std::hex << (slot / 256) << ":" << std::setfill('0') << std::setw(2) << std::hex << (slot % 256);
         return ss.str();
     }
+
+public:
+    Database db;
 
     void cleanup_vm_resources(MicroVM& vm) {
         std::cout << "[*] Cleaning up resources for VM " << vm.id << "...\n";
@@ -138,6 +140,10 @@ private:
                             // Leave resources intact, just clear PID
                             vms[slot].pid = 0;
                             pid_to_slot.erase(pid);
+                        } else if (vms[slot].status == "restarting") {
+                            // Leave resources intact for reboot!
+                            vms[slot].pid = 0;
+                            pid_to_slot.erase(pid);
                         } else {
                             cleanup_vm_resources(vms[slot]);
                             vms.erase(slot); pid_to_slot.erase(pid);
@@ -170,6 +176,7 @@ public:
         active_iface = get_default_interface();
         init_cryo_firewall_baseline(active_iface);
         std::filesystem::create_directories("/home/nirjhar/Python Codes/Einstein/CryoSpawn/instances");
+        std::filesystem::create_directories("/home/nirjhar/Python Codes/Einstein/CryoSpawn/volumes");
         reconcile_state(); 
         start_reaper();
     }
@@ -244,6 +251,20 @@ public:
         std::string drive_payload = "{\"drive_id\": \"rootfs\", \"path_on_host\": \"" + vm_rootfs.string() + "\", \"is_root_device\": true, \"is_read_only\": false}";
         if (!send_firecracker_put(vm.socket_path, "/drives/rootfs", drive_payload)) { terminate_vm(id); return false; }
 
+        // 3. Attach any assigned Elastic Volumes
+        auto all_vols = db.get_volumes();
+        for (const auto& vol : all_vols) {
+            if (vol.attached_vm_id == id) {
+                std::string vol_path = "/home/nirjhar/Python Codes/Einstein/CryoSpawn/volumes/vol_" + std::to_string(vol.id) + ".ext4";
+                std::string vol_payload = "{\"drive_id\": \"vol_" + std::to_string(vol.id) + "\", \"path_on_host\": \"" + vol_path + "\", \"is_root_device\": false, \"is_read_only\": false}";
+                if (!send_firecracker_put(vm.socket_path, "/drives/vol_" + std::to_string(vol.id), vol_payload)) {
+                    std::cerr << "[-] Failed to attach volume " << vol.id << " to VM " << id << "\n";
+                } else {
+                    std::cout << "[+] Attached Volume " << vol.id << " (" << vol.name << ") to VM " << id << "\n";
+                }
+            }
+        }
+
         std::string net_payload = "{\"iface_id\": \"eth0\", \"guest_mac\": \"" + vm.mac + "\", \"host_dev_name\": \"" + vm.tap_name + "\"}";
         if (!send_firecracker_put(vm.socket_path, "/network-interfaces/eth0", net_payload)) { terminate_vm(id); return false; }
 
@@ -256,12 +277,61 @@ public:
         return true;
     }
 
+
+    bool reboot_vm(int id, const std::string& kernel, const std::string& rootfs) {
+        MicroVM old_vm;
+        {
+            std::lock_guard<std::mutex> lock(mtx);
+            if (vms.find(id) == vms.end()) return false;
+            if (vms[id].pid > 0) {
+                vms[id].status = "restarting"; // Tell Reaper NOT to delete disk/TAP
+                kill(vms[id].pid, SIGKILL);
+            }
+            old_vm = vms[id];
+        }
+
+        // Wait for process to die and Reaper to clear PID
+        for(int i=0; i<50; ++i) {
+            bool dead = false;
+            {
+                std::lock_guard<std::mutex> lock(mtx);
+                if (vms.find(id) == vms.end() || vms[id].pid == 0) dead = true;
+            }
+            if (dead) break;
+            std::this_thread::sleep_for(std::chrono::milliseconds(100));
+        }
+
+        // Now respawn Firecracker reusing the same TAP and Rootfs!
+        {
+            std::lock_guard<std::mutex> lock(mtx);
+            old_vm.status = "booting";
+            unlink(old_vm.socket_path.c_str()); // CRITICAL: remove old UDS so new Firecracker can bind
+            
+            pid_t pid = fork();
+            if (pid == 0) {
+                setsid();
+                int dev_null = open("/dev/null", O_RDWR);
+                dup2(dev_null, STDOUT_FILENO); dup2(dev_null, STDERR_FILENO); dup2(dev_null, STDIN_FILENO); close(dev_null);
+                execlp("firecracker", "firecracker", "--api-sock", old_vm.socket_path.c_str(), (char*)NULL);
+                _exit(1);
+            }
+
+            old_vm.pid = pid;
+            vms[id] = old_vm;
+            pid_to_slot[pid] = id;
+            db.update_status(id, "booting");
+        }
+
+        // Configure and start!
+        return configure_and_start(id, kernel, rootfs);
+    }
+
     void terminate_vm(int id) {
         std::lock_guard<std::mutex> lock(mtx);
         if (vms.find(id) == vms.end()) return;
         
         if (vms[id].pid > 0) {
-            kill(vms[id].pid, SIGTERM);
+            kill(vms[id].pid, SIGKILL);
         } else if (vms[id].status == "hibernated") {
             cleanup_vm_resources(vms[id]);
             vms.erase(id);
@@ -291,6 +361,16 @@ public:
             kill(vms[id].pid, SIGTERM);
         }
         return true;
+    }
+
+    void update_vm_ports(int id, bool ssh, bool http, bool https) {
+        std::lock_guard<std::mutex> lock(mtx);
+        if (vms.find(id) != vms.end()) {
+            vms[id].ssh_exposed = ssh;
+            vms[id].http_exposed = http;
+            vms[id].https_exposed = https;
+            db.update_vm_ports(id, ssh, http, https);
+        }
     }
 
     bool wake_vm(int id) {
@@ -344,6 +424,26 @@ public:
             db.update_status(id, "running");
         }
         return true;
+    }
+
+    // --- Volumes ---
+    int create_volume(const std::string& name, int size_gb) {
+        int vol_id = db.insert_volume(name, size_gb);
+        std::string vol_path = "/home/nirjhar/Python Codes/Einstein/CryoSpawn/volumes/vol_" + std::to_string(vol_id) + ".ext4";
+        
+        std::string cmd1 = "truncate -s " + std::to_string(size_gb) + "G \"" + vol_path + "\"";
+        std::string cmd2 = "mkfs.ext4 -F \"" + vol_path + "\" > /dev/null 2>&1";
+        
+        system(cmd1.c_str());
+        system(cmd2.c_str());
+        
+        return vol_id;
+    }
+
+    void delete_volume(int vol_id) {
+        std::string vol_path = "/home/nirjhar/Python Codes/Einstein/CryoSpawn/volumes/vol_" + std::to_string(vol_id) + ".ext4";
+        unlink(vol_path.c_str());
+        db.remove_volume(vol_id);
     }
 
     std::vector<MicroVM> list_vms() {

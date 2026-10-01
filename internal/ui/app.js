@@ -1,5 +1,6 @@
 const API_URL = 'http://localhost:8080/api/vms';
 const LINKS_API_URL = 'http://localhost:8080/api/links';
+const VOLUMES_API_URL = 'http://localhost:8080/api/volumes';
 
 // DOM Elements
 const vmTableBody = document.getElementById('vm-table-body');
@@ -14,21 +15,28 @@ const linkVm1 = document.getElementById('link-vm1');
 const linkVm2 = document.getElementById('link-vm2');
 const linksContainer = document.getElementById('links-container');
 
-let cachedVMs = [];
+const volumeForm = document.getElementById('volume-form');
+const volumesContainer = document.getElementById('volumes-container');
 
-// Fetch VMs and Links concurrently
+let cachedVMs = [];
+let cachedVolumes = [];
+
+// Fetch VMs, Links, and Volumes concurrently
 async function fetchData() {
     try {
-        const [vmsRes, linksRes] = await Promise.all([
+        const [vmsRes, linksRes, volsRes] = await Promise.all([
             fetch(API_URL),
-            fetch(LINKS_API_URL)
+            fetch(LINKS_API_URL),
+            fetch(VOLUMES_API_URL)
         ]);
 
-        if (!vmsRes.ok || !linksRes.ok) throw new Error('Daemon communication error');
+        if (!vmsRes.ok || !linksRes.ok || !volsRes.ok) throw new Error('Daemon communication error');
 
         const vms = await vmsRes.json();
         const links = await linksRes.json();
+        const volumes = await volsRes.json();
         cachedVMs = vms;
+        cachedVolumes = volumes;
 
         connStatus.innerHTML = `<span class="h-2 w-2 rounded-full bg-green-500 mr-2"></span> Connected`;
         connStatus.className = "flex items-center text-sm font-medium text-green-600";
@@ -36,6 +44,7 @@ async function fetchData() {
         renderTable(vms);
         updateLinkSelectors(vms);
         renderLinks(links, vms);
+        renderVolumes(volumes, vms);
     } catch (error) {
         connStatus.innerHTML = `<span class="h-2 w-2 rounded-full bg-red-500 mr-2"></span> Offline`;
         connStatus.className = "flex items-center text-sm font-medium text-red-600";
@@ -83,9 +92,13 @@ function renderTable(vms) {
                     <span class="text-xs font-mono text-slate-500">${vm.host_ip}</span>
                 </div>
                 ${vm.ssh_exposed ? `
-                    <div class="mt-1 text-xs bg-slate-100 p-1 rounded font-mono text-blue-600 inline-block select-all" title="SSH via Unix Socket ProxyCommand">
-                        ssh -o ProxyCommand="nc -U /tmp/cryo_vm_${vm.id}_22.sock" root@localhost
-                    </div><br>
+                    <div class="mt-2 flex items-center space-x-2">
+                        <span class="text-xs bg-slate-100 px-1.5 py-0.5 rounded font-mono text-slate-500 border border-slate-200">Port 22</span>
+                        <button onclick='copySSH(this, ${vm.id})' class="text-xs bg-blue-50 text-blue-600 hover:bg-blue-100 px-2 py-1 rounded border border-blue-200 transition-colors flex items-center" title="Copy SSH Command">
+                            <svg class="w-3 h-3 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z"></path></svg>
+                            Copy SSH Command
+                        </button>
+                    </div>
                 ` : ''}
                 ${vm.http_exposed ? `
                     <div class="mt-1 text-xs bg-slate-100 p-1 rounded font-mono text-green-600 inline-block select-all" title="Nginx Ingress">
@@ -97,6 +110,20 @@ function renderTable(vms) {
                         https://vm${vm.id}.cryo
                     </div>
                 ` : ''}
+                <div class="mt-2 flex items-center space-x-3 text-xs border-t border-slate-100 pt-2">
+                    <label class="flex items-center space-x-1 cursor-pointer">
+                        <input type="checkbox" onchange="updatePorts(${vm.id}, this.checked, ${vm.http_exposed}, ${vm.https_exposed})" ${vm.ssh_exposed ? 'checked' : ''} class="rounded border-slate-300 text-blue-600 focus:ring-blue-500 cursor-pointer">
+                        <span class="text-slate-600 font-medium">SSH</span>
+                    </label>
+                    <label class="flex items-center space-x-1 cursor-pointer">
+                        <input type="checkbox" onchange="updatePorts(${vm.id}, ${vm.ssh_exposed}, this.checked, ${vm.https_exposed})" ${vm.http_exposed ? 'checked' : ''} class="rounded border-slate-300 text-blue-600 focus:ring-blue-500 cursor-pointer">
+                        <span class="text-slate-600 font-medium">HTTP</span>
+                    </label>
+                    <label class="flex items-center space-x-1 cursor-pointer">
+                        <input type="checkbox" onchange="updatePorts(${vm.id}, ${vm.ssh_exposed}, ${vm.http_exposed}, this.checked)" ${vm.https_exposed ? 'checked' : ''} class="rounded border-slate-300 text-blue-600 focus:ring-blue-500 cursor-pointer">
+                        <span class="text-slate-600 font-medium">HTTPS</span>
+                    </label>
+                </div>
             </td>
             <td class="px-6 py-4 whitespace-nowrap text-sm text-slate-600">
                 ${vm.vcpus} vCPU • ${vm.mem_mib} MB
@@ -259,6 +286,20 @@ async function wakeVM(id) {
     }
 }
 
+// Update VM Ports
+async function updatePorts(id, ssh, http, https) {
+    try {
+        await fetch(`${API_URL}/${id}/ports`, {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ ssh_exposed: ssh, http_exposed: http, https_exposed: https })
+        });
+        fetchData();
+    } catch {
+        alert("Failed to update ports.");
+    }
+}
+
 // Unlink VMs
 async function unlinkVMs(vm1, vm2) {
     try {
@@ -269,7 +310,167 @@ async function unlinkVMs(vm1, vm2) {
     }
 }
 
+// --- VOLUMES ---
+function renderVolumes(volumes, vms) {
+    if (!volumes || volumes.length === 0) {
+        volumesContainer.innerHTML = `<p class="text-xs text-slate-400 italic">No volumes created yet.</p>`;
+        return;
+    }
+
+    const prevSelections = {};
+    volumes.forEach(vol => {
+        const el = document.getElementById(`attach-select-${vol.id}`);
+        if (el && el.value) prevSelections[vol.id] = el.value;
+    });
+
+    const vmOptions = vms.map(v => `<option value="${v.id}">VM ${v.id} (${v.ip})</option>`).join('');
+
+    volumesContainer.innerHTML = volumes.map(vol => {
+        const attached = vol.attached_vm_id !== -1;
+        const statusBadge = attached 
+            ? `<span class="inline-flex items-center px-2 py-0.5 rounded text-[10px] font-medium bg-green-100 text-green-800">In Use (VM ${vol.attached_vm_id})</span>`
+            : `<span class="inline-flex items-center px-2 py-0.5 rounded text-[10px] font-medium bg-slate-100 text-slate-600">Available</span>`;
+
+        let actionHtml = '';
+        if (attached) {
+            actionHtml = `
+                <button onclick="detachVolume(${vol.id})" class="text-xs font-medium bg-orange-100 text-orange-700 hover:bg-orange-200 px-3 py-1.5 rounded-md transition-colors">
+                    Detach
+                </button>
+            `;
+        } else {
+            actionHtml = `
+                <div class="flex items-center space-x-2">
+                    <select id="attach-select-${vol.id}" class="text-xs border border-slate-300 rounded-md px-2 py-1.5 bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500 min-w-[120px]">
+                        <option value="" disabled selected>Select VM...</option>
+                        ${vmOptions}
+                    </select>
+                    <button onclick="attachVolume(${vol.id})" class="text-xs font-medium bg-indigo-600 text-white hover:bg-indigo-700 px-3 py-1.5 rounded-md transition-colors">
+                        Attach
+                    </button>
+                </div>
+            `;
+        }
+
+        return `
+            <div class="flex items-center justify-between p-3 bg-white border border-slate-200 rounded-lg shadow-sm">
+                <div>
+                    <div class="flex items-center space-x-2">
+                        <span class="font-semibold text-sm text-slate-800">${vol.name}</span>
+                        <span class="text-xs text-slate-500 bg-slate-100 px-1.5 rounded">${vol.size_gb} GB</span>
+                        ${statusBadge}
+                    </div>
+                    <div class="text-[10px] text-slate-400 font-mono mt-1">volumes/vol_${vol.id}.ext4</div>
+                </div>
+                <div class="flex items-center space-x-2">
+                    ${actionHtml}
+                    <button onclick="deleteVolume(${vol.id})" class="text-xs font-medium text-red-600 bg-red-50 hover:bg-red-100 px-3 py-1.5 rounded-md transition-colors border border-transparent hover:border-red-200">
+                        Delete
+                    </button>
+                </div>
+            </div>
+        `;
+    }).join('');
+
+    volumes.forEach(vol => {
+        if (prevSelections[vol.id]) {
+            const el = document.getElementById(`attach-select-${vol.id}`);
+            if (el) el.value = prevSelections[vol.id];
+        }
+    });
+}
+
+if (volumeForm) {
+    volumeForm.addEventListener('submit', async (e) => {
+        e.preventDefault();
+        const btn = document.getElementById('vol-btn');
+        btn.disabled = true;
+        btn.textContent = "Creating...";
+
+        const payload = {
+            name: document.getElementById('vol-name').value.trim(),
+            size_gb: parseInt(document.getElementById('vol-size').value)
+        };
+
+        try {
+            const response = await fetch(VOLUMES_API_URL, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(payload)
+            });
+            if (!response.ok) throw new Error("Failed to create volume");
+            document.getElementById('vol-name').value = '';
+            document.getElementById('vol-size').value = '';
+            fetchData();
+        } catch (error) {
+            alert(error.message);
+        } finally {
+            btn.disabled = false;
+            btn.textContent = "Create Volume";
+        }
+    });
+}
+
+async function deleteVolume(id) {
+    if (!confirm(`Are you sure you want to permanently delete Volume ${id}? All data will be lost!`)) return;
+    try {
+        await fetch(`${VOLUMES_API_URL}/${id}`, { method: 'DELETE' });
+        fetchData();
+    } catch {
+        alert("Failed to delete volume.");
+    }
+}
+
+async function attachVolume(volId) {
+    const select = document.getElementById(`attach-select-${volId}`);
+    const vmId = select.value;
+    if (!vmId) {
+        alert("Please select a VM first.");
+        return;
+    }
+    
+    if (!confirm(`Attaching this volume will REBOOT the target VM (VM ${vmId}). Unsaved RAM state will be lost. Proceed?`)) return;
+
+    try {
+        await fetch(`${VOLUMES_API_URL}/${volId}/attach`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ vm_id: parseInt(vmId) })
+        });
+        fetchData();
+    } catch {
+        alert("Failed to attach volume.");
+    }
+}
+
+async function detachVolume(volId) {
+    if (!confirm(`Detaching this volume will REBOOT the target VM. Proceed?`)) return;
+    try {
+        await fetch(`${VOLUMES_API_URL}/${volId}/detach`, { method: 'POST' });
+        fetchData();
+    } catch {
+        alert("Failed to detach volume.");
+    }
+}
+
+// Copy SSH command
+function copySSH(btn, id) {
+    const cmd = `ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ProxyCommand="nc -U /tmp/cryo_vm_${id}_22.sock" root@localhost`;
+    navigator.clipboard.writeText(cmd).then(() => {
+        const originalHtml = btn.innerHTML;
+        btn.innerHTML = `<svg class="w-3 h-3 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"></path></svg> Copied!`;
+        btn.classList.replace('text-blue-600', 'text-green-600');
+        btn.classList.replace('bg-blue-50', 'bg-green-50');
+        btn.classList.replace('border-blue-200', 'border-green-200');
+        setTimeout(() => {
+            btn.innerHTML = originalHtml;
+            btn.classList.replace('text-green-600', 'text-blue-600');
+            btn.classList.replace('bg-green-50', 'bg-blue-50');
+            btn.classList.replace('border-green-200', 'border-blue-200');
+        }, 2000);
+    });
+}
+
 // Poll every 2 seconds
 fetchData();
 setInterval(fetchData, 2000);
-
