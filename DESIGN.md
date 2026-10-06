@@ -112,6 +112,7 @@ Stores every individual MicroVM registered in the platform.
 | `https_exposed`| `INTEGER`| Boolean (`1` or `0`): whether Ghost Proxy should listen for HTTPS (Port 443). |
 | `host_port` | `INTEGER` | Legacy port field (kept for schema backward compatibility). |
 | `project_name` | `TEXT` | The project namespace (e.g., `"default"`, `"production"`, `"lab1"`). |
+| `rootfs_gb` | `INTEGER` | Requested root disk size in GB (default `1` in the schema; the API defaults to `3`). Added by a safe `ALTER TABLE`. |
 
 ### Table: `network_links`
 Stores custom virtual network bridges established between two isolated VMs.
@@ -123,6 +124,18 @@ Stores custom virtual network bridges established between two isolated VMs.
 | `vm1_id` | `INTEGER` | Slot ID of the first VM. |
 | `vm2_id` | `INTEGER` | Slot ID of the second VM. |
 | *Constraint* | `UNIQUE(vm1_id, vm2_id)` | Prevents duplicate routing rules between the same two VMs. |
+
+### Table: `volumes`
+Stores extra ext4 disks (Elastic Storage Volumes) that can be attached to a VM.
+
+| Column Name | SQL Type | Description / Purpose |
+| :--- | :--- | :--- |
+| `id` | `INTEGER PRIMARY KEY AUTOINCREMENT` | Volume ID. The disk file is `volumes/vol_<id>.ext4`. |
+| `name` | `TEXT` | Human-readable name. |
+| `size_gb` | `INTEGER` | Size in GB. |
+| `attached_vm_id` | `INTEGER DEFAULT -1` | Slot ID of the VM using the volume, or `-1` when detached. |
+
+Volumes are created with `truncate` + `mkfs.ext4`. `configure_and_start()` attaches every volume whose `attached_vm_id` matches the VM as an extra Firecracker drive (`PUT /drives/vol_<id>`). Attaching or detaching reboots a running VM so the drive change takes effect.
 
 ---
 
@@ -286,6 +299,20 @@ ssh -o ProxyCommand="nc -U /tmp/cryo_vm_0_22.sock" root@localhost
 
 ## 5. End-to-End Data Flows (Step-by-Step)
 
+### VM lifecycle states
+
+```mermaid
+stateDiagram-v2
+    [*] --> booting: create_vm
+    booting --> running: InstanceStart ok
+    running --> hibernated: hibernate_vm
+    hibernated --> waking: wake_vm (API or Ghost Proxy)
+    waking --> running: snapshot loaded and resumed
+    running --> booting: reboot_vm (volume attach/detach)
+    running --> [*]: terminate_vm
+    hibernated --> [*]: terminate_vm
+```
+
 ### Flow 1: Creating a MicroVM
 When you click **"Initialize VM"** in the web dashboard:
 
@@ -307,6 +334,7 @@ When you click **"Initialize VM"** in the web dashboard:
        |-- 1. Waits for /tmp/cryo_0.socket to appear
        |-- 2. PUT /boot-source (passes ubuntu-vmlinux.bin + kernel boot args)
        |-- 3. Copies rootfs/ubuntu-rootfs.ext4 -> instances/vm_0_rootfs.ext4 (Copy-on-Write isolation)
+       |      If rootfs_gb >= 3: truncate -s <N>G, e2fsck -fy, resize2fs (grows the disk)
        |-- 4. PUT /drives/rootfs (attaches instances/vm_0_rootfs.ext4)
        |-- 5. PUT /network-interfaces/eth0 (attaches tap device cryo0)
        |-- 6. PUT /machine-config (sets vCPUs and RAM)
@@ -351,27 +379,30 @@ When you click **"Hibernate"** (or auto-idle triggers):
 ### Flow 3: The Magic Auto-Wake (Ghost Proxy in Action)
 The VM is hibernated. You open your browser and navigate to `http://vm0.cryo`:
 
-```
-1. Browser sends HTTP GET request to http://vm0.cryo
-2. Nginx forwards request to Unix Domain Socket `/tmp/cryo_vm_0_80.sock`
-3. Ghost Proxy thread `accept()` unblocks with the client connection
-4. Ghost Proxy checks `status_fn(0)` -> VM 0 is HIBERNATED!
-5. Ghost Proxy calls `wake_vm(0)`:
-   - Sets vms[0].status = "waking" (Lock prevents race conditions from concurrent requests)
-   - fork() -> Starts fresh `firecracker --api-sock /tmp/cryo_0.socket`
-   - Waits for API socket to initialize
-   - PUT /snapshot/load {
-         "snapshot_path": "instances/vm_0_state.snap",
-         "mem_file_path": "instances/vm_0_mem.ram"
-     } -> Memory is mmap'd back instantly!
-   - PATCH /vm {"state": "Resumed"} -> CPU cores start running where they left off!
-   - Sets vms[0].status = "running"
-   - Returns true!
-6. Ghost Proxy connects via TCP to VM: `connect("172.16.0.2", 80)`
-7. Ghost Proxy pipes the browser's HTTP GET request directly into the VM
-8. The VM's web server responds with the web page
-9. Ghost Proxy relays response back to Nginx -> back to your browser!
-10. Total Elapsed Time: ~80 to 120 milliseconds!
+```mermaid
+sequenceDiagram
+    participant B as Browser
+    participant N as Nginx
+    participant P as Ghost Proxy
+    participant M as VMManager
+    participant F as Firecracker
+    participant V as VM web server
+
+    B->>N: GET http://vm0.cryo
+    N->>P: /tmp/cryo_vm_0_80.sock
+    P->>P: status_fn(0) is hibernated
+    P->>M: wake_vm(0)
+    M->>M: status = "waking" (lock blocks concurrent wakes)
+    M->>F: fork() new firecracker process
+    M->>F: PUT /snapshot/load (state + memory files)
+    M->>F: PATCH /vm {"state": "Resumed"}
+    M->>M: status = "running"
+    M-->>P: true
+    P->>V: TCP connect 172.16.0.2:80
+    P->>V: relay GET request
+    V-->>P: response
+    P-->>N: relay response
+    N-->>B: page (about 80 to 120 ms total)
 ```
 
 ---
@@ -403,19 +434,9 @@ When you click **"Destroy"** in the UI:
 
 ## 6. API Reference (HTTP REST Endpoints)
 
-The CryoSpawn daemon listens on `http://0.0.0.0:8080`.
+The CryoSpawn daemon listens on `http://0.0.0.0:8080` and exposes endpoints for VMs (`/api/vms`), network links (`/api/links`) and volumes (`/api/volumes`).
 
-| Method | Endpoint | Description | Request Body Example | Response Example |
-| :--- | :--- | :--- | :--- | :--- |
-| `GET` | `/api/vms` | List all active, hibernated, or booting VMs | *None* | `[{"id":0, "ip":"172.16.0.2", "status":"running", ...}]` |
-| `POST` | `/api/vms` | Spawn and boot a new MicroVM | `{"vcpus":1, "mem_mib":512, "expose_http":true, "project":"lab1"}` | `{"id":0, "ip":"172.16.0.2", "status":"booting"}` |
-| `DELETE`| `/api/vms/:id` | Terminate VM and wipe all resources | *None* | `{"status":"deleted"}` |
-| `POST` | `/api/vms/:id/hibernate`| Pause VM, dump RAM, and kill process | *None* | `{"status":"hibernated"}` |
-| `POST` | `/api/vms/:id/wake` | Manually resume a hibernated VM | *None* | `{"status":"running"}` |
-| `POST` | `/api/vms/:id/restart` | Wipe and re-create a clean VM in that slot | *None* | `{"status":"restarting"}` |
-| `GET` | `/api/links` | List all active inter-VM network links | *None* | `[{"id":1, "vm1":0, "vm2":1, "project":"routed"}]` |
-| `POST` | `/api/links` | Bridge two isolated VMs together | `{"vm1": 0, "vm2": 1}` | `{"status":"linked"}` |
-| `DELETE`| `/api/links/:vm1/:vm2` | Sever network bridge between two VMs | *None* | `{"status":"unlinked"}` |
+The full endpoint reference, with request and response fields, lives in [docs/API.md](docs/API.md).
 
 ---
 
@@ -446,8 +467,11 @@ The CryoSpawn daemon listens on `http://0.0.0.0:8080`.
 ```
 CryoSpawn/
 ├── cryospawn.db                   # SQLite database file storing persistent state
+├── README.md                      # Project overview & documentation guide
 ├── ROADMAP.md                     # Platform vision & phased engineering roadmap
 ├── DESIGN.md                      # This document (Architecture & Design)
+├── docs/                          # SETUP.md (build & run), API.md (HTTP reference)
+├── volumes/                       # Attachable disks: vol_<id>.ext4
 ├── instances/                     # Per-VM dynamic instance files
 │   ├── vm_0_rootfs.ext4          # Copy-on-Write disk image for VM 0
 │   ├── vm_0_state.snap           # CPU registers & device state snapshot
