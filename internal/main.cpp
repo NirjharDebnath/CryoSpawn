@@ -56,6 +56,7 @@ int main() {
     svr.Post("/api/vms", [&](const httplib::Request& req, httplib::Response& res) {
         int vcpus = 1; int mem_mib = 512; 
         bool expose_ssh = false; bool expose_http = false; bool expose_https = false;
+        int rootfs_gb = 3;
         std::string project = "default";
 
         if (!req.body.empty()) {
@@ -67,12 +68,13 @@ int main() {
                 if (body.contains("expose_http")) expose_http = body["expose_http"];
                 if (body.contains("expose_https")) expose_https = body["expose_https"];
                 if (body.contains("project")) project = body["project"];
+                if (body.contains("rootfs_gb")) { rootfs_gb = body["rootfs_gb"]; }
             } catch (...) {
                 res.status = 400; res.set_content(R"({"error": "Invalid JSON"})", "application/json"); return;
             }
         }
         try {
-            MicroVM vm = manager.create_vm(vcpus, mem_mib, expose_ssh, expose_http, expose_https, project);
+            MicroVM vm = manager.create_vm(vcpus, mem_mib, expose_ssh, expose_http, expose_https, project, rootfs_gb);
             std::thread([&manager, vm, KERNEL_PATH, ROOTFS_PATH]() {
                 manager.configure_and_start(vm.id, KERNEL_PATH, ROOTFS_PATH);
             }).detach();
@@ -109,7 +111,7 @@ int main() {
         manager.reboot_vm(id, KERNEL_PATH, ROOTFS_PATH);
         std::this_thread::sleep_for(std::chrono::milliseconds(200));
         try {
-            MicroVM vm = manager.create_vm(1, 512, false, false, false, "default"); 
+            MicroVM vm = manager.create_vm(1, 512, false, false, false, "default", 1); 
             std::thread([&manager, vm, KERNEL_PATH, ROOTFS_PATH]() { manager.configure_and_start(vm.id, KERNEL_PATH, ROOTFS_PATH); }).detach();
             res.set_content(R"({"status": "restarting"})", "application/json");
         } catch (const std::exception& e) { res.status = 500; res.set_content(json{{"error", e.what()}}.dump(), "application/json"); }
@@ -173,7 +175,9 @@ int main() {
     });
 
     svr.Delete(R"(^/api/vms/(\d+)$)", [&](const httplib::Request& req, httplib::Response& res) {
-        int id = std::stoi(req.matches[1]); manager.reboot_vm(id, KERNEL_PATH, ROOTFS_PATH);
+        int id = std::stoi(req.matches[1]); 
+        manager.terminate_vm(id);
+        manager.db.remove_vm(id);
         res.set_content(R"({"status": "deleted"})", "application/json");
     });
 

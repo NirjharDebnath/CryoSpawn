@@ -29,6 +29,7 @@ struct MicroVM {
     std::string status = "stopped";
     int vcpus = 1; 
     int mem_mib = 512; 
+    int rootfs_gb = 1;
     bool ssh_exposed = false; 
     bool http_exposed = false;
     bool https_exposed = false;
@@ -107,6 +108,7 @@ public:
                 vm.ssh_exposed = r.ssh_exposed;
                 vm.http_exposed = r.http_exposed;
                 vm.https_exposed = r.https_exposed;
+                vm.rootfs_gb = r.rootfs_gb;
                 vm.host_port = r.host_port;
                 vm.project_name = r.project_name; 
                 vm.socket_path = r.socket_path;
@@ -181,7 +183,7 @@ public:
         start_reaper();
     }
 
-    MicroVM create_vm(int vcpus, int mem_mib, bool expose_ssh, bool expose_http, bool expose_https, const std::string& project) {
+    MicroVM create_vm(int vcpus, int mem_mib, bool expose_ssh, bool expose_http, bool expose_https, const std::string& project, int rootfs_gb) {
         std::lock_guard<std::mutex> lock(mtx);
         int slot = db.get_next_free_slot(); int base = slot * 4;
         
@@ -194,7 +196,7 @@ public:
         vm.ssh_exposed = expose_ssh; 
         vm.http_exposed = expose_http;
         vm.https_exposed = expose_https;
-        vm.project_name = project;
+        vm.project_name = project; vm.rootfs_gb = rootfs_gb;
         if (expose_ssh) vm.host_port = 2200 + slot;
 
         setup_cryo_network(vm.tap_name, vm.host_ip, active_iface);
@@ -211,7 +213,7 @@ public:
         }
 
         vm.pid = pid; vms[vm.id] = vm; pid_to_slot[pid] = vm.id;
-        db.insert_vm(slot, pid, "booting", vcpus, mem_mib, vm.ip, vm.host_ip, vm.tap_name, expose_ssh, vm.host_port, project, expose_http, expose_https);
+        db.insert_vm(slot, pid, "booting", vcpus, mem_mib, vm.ip, vm.host_ip, vm.tap_name, expose_ssh, vm.host_port, project, expose_http, expose_https, rootfs_gb);
         return vm;
     }
 
@@ -239,8 +241,16 @@ public:
         std::filesystem::path vm_rootfs = std::filesystem::path("/home/nirjhar/Python Codes/Einstein/CryoSpawn/instances") / ("vm_" + std::to_string(id) + "_rootfs.ext4");
         
         try {
-            std::cout << "[*] Cloning disk image for VM " << id << "...\n";
-            std::filesystem::copy(base_path, vm_rootfs, std::filesystem::copy_options::overwrite_existing);
+            if (!std::filesystem::exists(vm_rootfs)) {
+                std::cout << "[*] Cloning disk image for VM " << id << "...\n";
+                std::filesystem::copy(base_path, vm_rootfs);
+                if (vm.rootfs_gb >= 3) {
+                    std::cout << "[*] Expanding rootfs to " << vm.rootfs_gb << "GB...\n";
+                    system(("truncate -s " + std::to_string(vm.rootfs_gb) + "G \"" + vm_rootfs.string() + "\"").c_str());
+                    system(("e2fsck -fy \"" + vm_rootfs.string() + "\" > /dev/null 2>&1").c_str());
+                    system(("resize2fs \"" + vm_rootfs.string() + "\" > /dev/null 2>&1").c_str());
+                }
+            }
         } catch (const std::exception& e) {
             std::cerr << "[-] Failed to clone rootfs: " << e.what() << "\n";
             terminate_vm(id);
@@ -358,7 +368,7 @@ public:
             db.update_status(id, "hibernated");
             
             // 4. Kill the Firecracker process to free host RAM
-            kill(vms[id].pid, SIGTERM);
+            kill(vms[id].pid, SIGKILL);
         }
         return true;
     }

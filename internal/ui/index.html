@@ -46,6 +46,15 @@
                         </div>
                     </div>
 
+                    <div class="space-y-2 pt-2 border-t border-slate-100">
+                        <label class="block text-sm font-medium text-slate-700">OS Disk Size (GB)</label>
+                        <div class="flex items-center space-x-4">
+                            <input type="range" id="rootfs_gb" min="3" max="8" value="3" class="w-full h-2 bg-slate-200 rounded-lg appearance-none cursor-pointer accent-blue-600">
+                            <span id="rootfs_display" class="text-sm font-semibold text-slate-700 w-16 text-right">3 GB</span>
+                        </div>
+                        <p class="text-[10px] text-slate-500">Minimum 3GB required for Ubuntu OS. Max 8GB. For larger storage, attach an Elastic Volume.</p>
+                    </div>
+
                     <div class="pt-2 border-t border-slate-100">
                         <label class="block text-sm font-medium text-slate-700 mb-2">Network Configuration</label>
                         <span class="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-medium bg-purple-100 text-purple-800 border border-purple-200">

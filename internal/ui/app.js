@@ -126,7 +126,7 @@ function renderTable(vms) {
                 </div>
             </td>
             <td class="px-6 py-4 whitespace-nowrap text-sm text-slate-600">
-                ${vm.vcpus} vCPU • ${vm.mem_mib} MB
+                ${vm.vcpus} vCPU • ${vm.mem_mib} MB • ${vm.rootfs_gb} GB Disk
             </td>
             <td class="px-6 py-4 whitespace-nowrap text-right space-x-2">
                 ${vm.status === 'running' ? `
@@ -209,7 +209,8 @@ spawnForm.addEventListener('submit', async (e) => {
         mem_mib: parseInt(document.getElementById('ram').value),
         expose_ssh: document.getElementById('expose-ssh').checked,
         expose_http: document.getElementById('expose-http').checked,
-        expose_https: document.getElementById('expose-https').checked
+        expose_https: document.getElementById('expose-https').checked,
+        rootfs_gb: parseInt(document.getElementById('rootfs_gb').value)
     };
 
     try {
@@ -474,3 +475,12 @@ function copySSH(btn, id) {
 // Poll every 2 seconds
 fetchData();
 setInterval(fetchData, 2000);
+
+// Rootfs Slider
+const rootfsGb = document.getElementById('rootfs_gb');
+const rootfsDisplay = document.getElementById('rootfs_display');
+if (rootfsGb && rootfsDisplay) {
+    rootfsGb.addEventListener('input', (e) => {
+        rootfsDisplay.textContent = e.target.value + ' GB';
+    });
+}
