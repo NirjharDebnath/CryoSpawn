@@ -28,12 +28,12 @@
     L.packets = el("g", {}, svg);
 
     // zones
-    el("rect", { x: 200, y: 16, width: 825, height: 728, rx: 18, class: "zone-rect" }, L.zones);
+    el("rect", { x: 200, y: 16, width: 895, height: 765, rx: 18, class: "zone-rect" }, L.zones);
     el("text", { x: 218, y: 40, class: "zone-label" }, L.zones).textContent = "Linux host · KVM";
     el("text", { x: 18, y: 40, class: "zone-label" }, L.zones).textContent = "Clients";
-    el("text", { x: 1046, y: 40, class: "zone-label" }, L.zones).textContent = "Outside";
-    el("text", { x: 772, y: 160, class: "zone-label" }, L.zones).textContent = "TAP";
-    el("text", { x: 880, y: 160, class: "zone-label" }, L.zones).textContent = "Firecracker";
+    el("text", { x: 1115, y: 40, class: "zone-label" }, L.zones).textContent = "Outside";
+    el("text", { x: 768, y: 168, class: "zone-label" }, L.zones).textContent = "TAP";
+    el("text", { x: 925, y: 168, class: "zone-label" }, L.zones).textContent = "Firecracker";
 
     // edges
     for (const id in CS.EDGES) {
@@ -52,7 +52,7 @@
     }
 
     // link gate
-    const g = el("g", { id: "gate", class: "gate blocked", transform: "translate(930,325)" }, L.nodes);
+    const g = el("g", { id: "gate", class: "gate blocked", transform: "translate(1000,335)" }, L.nodes);
     el("circle", { r: 13 }, g);
     const fo = el("foreignObject", { x: -13, y: -13, width: 26, height: 26 }, g);
     const d = document.createElementNS(XHTML, "div");
