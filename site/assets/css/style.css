@@ -60,6 +60,7 @@ a:hover { color: #a5f3ff; }
 
 /* ---------- shared width container ---------- */
 .wrap { width: 100%; max-width: 1200px; margin-inline: auto; padding-inline: 16px; }
+.wrap-wide { max-width: 1680px; }
 
 /* ---------- nav ---------- */
 .site-nav {
@@ -118,10 +119,10 @@ a:hover { color: #a5f3ff; }
 .btn-ctl:hover, .btn-ctl.active { color: var(--text); border-color: var(--ice); }
 .btn-ctl:disabled { opacity: .4; }
 
-.map-body { display: grid; grid-template-columns: minmax(0, 1fr) 270px; gap: 10px; padding-top: 10px; align-items: stretch; }
+.map-body { display: grid; grid-template-columns: minmax(0, 1fr) 300px; gap: 10px; padding-top: 10px; align-items: stretch; }
 .map-scroll { overflow-x: auto; border-radius: 12px; background: rgba(6, 10, 19, .6); border: 1px solid var(--line); }
-.map-scroll::-webkit-scrollbar { height: 8px; }
-.map-scroll::-webkit-scrollbar-thumb { background: var(--line-2); border-radius: 8px; }
+.map-scroll, .log-list { scrollbar-width: none; -ms-overflow-style: none; }
+.map-scroll::-webkit-scrollbar, .log-list::-webkit-scrollbar { display: none; }
 #map { display: block; width: 100%; height: auto; }
 
 .zone-rect { fill: rgba(20, 32, 54, .35); stroke: var(--line-2); stroke-dasharray: 6 6; }
