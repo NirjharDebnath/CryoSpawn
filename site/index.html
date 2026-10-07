@@ -1,0 +1,272 @@
+<!doctype html>
+<html lang="en" data-bs-theme="dark">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>CryoSpawn Flow Map</title>
+  <meta name="description" content="Animated map of how CryoSpawn creates, networks, hibernates, wakes and cleans up Firecracker MicroVMs.">
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'><text y='14' font-size='14'>❄</text></svg>">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600&family=Space+Grotesk:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css">
+  <link rel="stylesheet" href="assets/css/style.css">
+</head>
+<body>
+
+<nav class="navbar navbar-expand-lg site-nav">
+  <div class="wrap">
+    <a class="navbar-brand" href="#top"><i class="bi bi-snow2 me-1"></i> CryoSpawn <span class="text-muted-2 fw-normal">flow map</span></a>
+    <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#nav" aria-controls="nav" aria-expanded="false" aria-label="Toggle navigation">
+      <span class="navbar-toggler-icon"></span>
+    </button>
+    <div class="collapse navbar-collapse" id="nav">
+      <ul class="navbar-nav ms-auto">
+        <li class="nav-item"><a class="nav-link" href="#map-section">Live map</a></li>
+        <li class="nav-item"><a class="nav-link" href="#work">Who does what</a></li>
+        <li class="nav-item"><a class="nav-link" href="#lifecycle">Lifecycle</a></li>
+        <li class="nav-item"><a class="nav-link" href="#addressing">Addressing</a></li>
+        <li class="nav-item"><a class="nav-link" href="#flows-section">Flows</a></li>
+        <li class="nav-item"><a class="nav-link" href="https://github.com/NirjharDebnath/CryoSpawn"><i class="bi bi-github"></i></a></li>
+      </ul>
+    </div>
+  </div>
+</nav>
+
+<header class="hero" id="top">
+  <div class="wrap">
+    <div class="eyebrow mb-2">Firecracker · KVM · C++17 daemon</div>
+    <h1>How <span class="grad">CryoSpawn</span><br>moves a MicroVM</h1>
+    <p class="lead mt-3">Follow every request, process, socket, firewall rule and disk file as the daemon creates VMs, freezes them to disk, wakes them on traffic, links their networks and cleans up after them.</p>
+    <div class="legend mt-4">
+      <span><i class="dot" style="background:var(--ice)"></i>request / control</span>
+      <span><i class="dot" style="background:var(--run)"></i>running</span>
+      <span><i class="dot" style="background:var(--wake)"></i>booting / waking</span>
+      <span><i class="dot" style="background:var(--sleep)"></i>hibernated</span>
+      <span><i class="dot" style="background:var(--net)"></i>kernel network</span>
+      <span><i class="dot" style="background:var(--disk)"></i>storage</span>
+      <span><i class="dot" style="background:var(--deny)"></i>dropped / removed</span>
+    </div>
+  </div>
+</header>
+
+<!-- ============ LIVE MAP ============ -->
+<section class="section pt-3" id="map-section">
+  <div class="wrap">
+    <div class="section-head reveal">
+      <div class="eyebrow">01 · Live map</div>
+      <h2>The whole system, one packet at a time</h2>
+      <p class="sub">A guided tour starts on its own. Pick any scenario to replay it: packets travel along the real call paths, VMs switch on and off, TAP devices appear and disappear, and the step log names the function doing the work.</p>
+    </div>
+
+    <div class="panel map-shell">
+      <div class="map-toolbar">
+        <div id="scenario-bar" class="d-flex flex-wrap gap-3"></div>
+        <div class="ms-xl-auto">
+          <div class="group-label">Playback</div>
+          <div class="btn-group-wrap">
+            <button class="btn-scn" id="btn-tour" style="--c:var(--ice)"><i class="bi bi-collection-play"></i>Guided tour</button>
+            <button class="btn-ctl" id="btn-pause"><i class="bi bi-pause-fill"></i> Pause</button>
+            <button class="btn-ctl" id="btn-replay"><i class="bi bi-arrow-counterclockwise"></i> Replay</button>
+            <button class="btn-ctl" data-speed="0.5">0.5×</button>
+            <button class="btn-ctl active" data-speed="1">1×</button>
+            <button class="btn-ctl" data-speed="2">2×</button>
+          </div>
+        </div>
+      </div>
+
+      <div class="map-body">
+        <div class="map-scroll">
+          <svg id="map" viewBox="0 0 1200 760" role="img" aria-label="CryoSpawn architecture map"></svg>
+        </div>
+        <aside class="panel log">
+          <div class="log-head">
+            <div class="title" id="log-title">Step log</div>
+            <div class="trig" id="log-trig">Waiting for a scenario…</div>
+          </div>
+          <ol class="log-list" id="log-list">
+            <li class="log-empty"><i class="bi bi-play-circle"></i>Scroll the map into view or pick a scenario.</li>
+          </ol>
+        </aside>
+      </div>
+
+      <div class="counters">
+        <div class="counter" data-counter="fc"><div class="k">Firecracker procs</div><div class="v"><i class="bi bi-cpu" style="color:var(--run)"></i><span class="num">0</span></div></div>
+        <div class="counter" data-counter="hib"><div class="k">Hibernated VMs</div><div class="v"><i class="bi bi-snow" style="color:var(--sleep)"></i><span class="num">0</span></div></div>
+        <div class="counter" data-counter="tap"><div class="k">TAP devices</div><div class="v"><i class="bi bi-ethernet" style="color:var(--net)"></i><span class="num">0</span></div></div>
+        <div class="counter" data-counter="sock"><div class="k">VMs with sockets</div><div class="v"><i class="bi bi-plug" style="color:var(--ice)"></i><span class="num">0</span></div></div>
+        <div class="counter" data-counter="files"><div class="k">Disk files</div><div class="v"><i class="bi bi-device-hdd" style="color:var(--disk)"></i><span class="num">0</span></div></div>
+        <div class="counter" data-counter="rules"><div class="k">Link rules</div><div class="v"><i class="bi bi-shield-check" style="color:var(--net)"></i><span class="num">0</span></div></div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ============ WORK DISTRIBUTION ============ -->
+<section class="section" id="work">
+  <div class="wrap">
+    <div class="section-head reveal">
+      <div class="eyebrow">02 · Who does what</div>
+      <h2>How the work is split</h2>
+      <p class="sub">One root daemon holds the state and spawns small threads for each job. Each VM is a separate Firecracker process. The Linux kernel and Nginx do the packet work.</p>
+    </div>
+    <div class="row g-3">
+      <div class="col-lg-4 col-md-6 reveal">
+        <div class="panel work-card" style="--c:var(--ice)">
+          <div class="kind">process · root</div>
+          <h3><i class="bi bi-cpu"></i>cryospawn daemon</h3>
+          <div class="thread"><span class="spin"></span><div><b>HTTP server</b> <span class="n">httplib · :8080</span><br><span class="text-muted-2">Runs each REST handler and serves the dashboard files.</span></div></div>
+          <div class="thread"><span class="spin" style="--c:var(--run)"></span><div><b>configure_and_start</b> <span class="n">1 per create</span><br><span class="text-muted-2">Detached thread that configures Firecracker and boots the guest.</span></div></div>
+          <div class="thread"><span class="spin" style="--c:var(--wake)"></span><div><b>Reaper</b> <span class="n">1 · every 2 s</span><br><span class="text-muted-2">waitpid() + kill(pid, 0); cleans up dead VMs and keeps hibernated or restarting ones.</span></div></div>
+          <div class="thread"><span class="spin" style="--c:var(--disk)"></span><div><b>VMManager mutex</b> <span class="n">shared</span><br><span class="text-muted-2">Serialises changes to the in-memory VM map and their SQLite writes.</span></div></div>
+        </div>
+      </div>
+      <div class="col-lg-4 col-md-6 reveal">
+        <div class="panel work-card" style="--c:var(--wake)">
+          <div class="kind">threads inside the daemon</div>
+          <h3><i class="bi bi-shuffle"></i>Ghost Proxy</h3>
+          <div class="thread"><span class="spin"></span><div><b>Listener</b> <span class="n">1 per exposed port</span><br><span class="text-muted-2">Owns /tmp/cryo_vm_N_P.sock (chmod 0666) and loops on accept().</span></div></div>
+          <div class="thread"><span class="spin"></span><div><b>Client handler</b> <span class="n">1 per connection</span><br><span class="text-muted-2">Wakes the VM if it is hibernated, then connects to guest IP:port.</span></div></div>
+          <div class="thread"><span class="spin"></span><div><b>Relays</b> <span class="n">2 per connection</span><br><span class="text-muted-2">relay_data() copies bytes in each direction with an 8 KB buffer.</span></div></div>
+        </div>
+      </div>
+      <div class="col-lg-4 col-md-6 reveal">
+        <div class="panel work-card" style="--c:var(--run)">
+          <div class="kind">process · 1 per live VM</div>
+          <h3><i class="bi bi-pc-display"></i>Firecracker</h3>
+          <div class="thread"><span class="spin"></span><div><b>MicroVM</b> <span class="n">KVM guest</span><br><span class="text-muted-2">Started with fork() + execlp and setsid(), so stopping the daemon does not kill it.</span></div></div>
+          <div class="thread"><span class="spin"></span><div><b>API socket</b> <span class="n">/tmp/cryo_N.socket</span><br><span class="text-muted-2">The daemon configures it with PUT/PATCH: boot source, drives, NIC, machine config, snapshots.</span></div></div>
+          <div class="thread"><span class="spin" style="--c:var(--sleep)"></span><div><b>Hibernated</b> <span class="n">0 processes</span><br><span class="text-muted-2">The process is killed; the VM lives on only as .snap and .ram files.</span></div></div>
+        </div>
+      </div>
+      <div class="col-lg-4 col-md-6 reveal">
+        <div class="panel work-card" style="--c:var(--net)">
+          <div class="kind">Linux kernel</div>
+          <h3><i class="bi bi-shield-lock"></i>TAP + netfilter</h3>
+          <div class="thread"><span class="spin"></span><div><b>TAP cryoN</b> <span class="n">1 per VM</span><br><span class="text-muted-2">Point-to-point /30 link between the host gateway and the guest.</span></div></div>
+          <div class="thread"><span class="spin"></span><div><b>iptables</b> <span class="n">baseline + links</span><br><span class="text-muted-2">NAT to the internet, DROP between VMs, 4 extra rules per link.</span></div></div>
+        </div>
+      </div>
+      <div class="col-lg-4 col-md-6 reveal">
+        <div class="panel work-card" style="--c:var(--ice)">
+          <div class="kind">process · host</div>
+          <h3><i class="bi bi-signpost-split"></i>Nginx ingress</h3>
+          <div class="thread"><span class="spin"></span><div><b>vmN.cryo</b> <span class="n">:80 and :443</span><br><span class="text-muted-2">A regex captures N from the host name and proxies to that VM's Unix socket.</span></div></div>
+          <div class="thread"><span class="spin"></span><div><b>/etc/hosts</b> <span class="n">127.0.0.1</span><br><span class="text-muted-2">Points vmN.cryo names at the local machine.</span></div></div>
+        </div>
+      </div>
+      <div class="col-lg-4 col-md-6 reveal">
+        <div class="panel work-card" style="--c:var(--disk)">
+          <div class="kind">files</div>
+          <h3><i class="bi bi-device-hdd"></i>State on disk</h3>
+          <div class="thread"><span class="spin"></span><div><b>cryospawn.db</b> <span class="n">SQLite</span><br><span class="text-muted-2">Tables vms, network_links and volumes; read again on every startup.</span></div></div>
+          <div class="thread"><span class="spin"></span><div><b>instances/</b> <span class="n">per VM</span><br><span class="text-muted-2">Its own copy of the rootfs, plus snapshot files while it is hibernated.</span></div></div>
+          <div class="thread"><span class="spin"></span><div><b>volumes/</b> <span class="n">vol_N.ext4</span><br><span class="text-muted-2">Extra ext4 disks attached as additional Firecracker drives.</span></div></div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ============ LIFECYCLE ============ -->
+<section class="section" id="lifecycle">
+  <div class="wrap">
+    <div class="section-head reveal">
+      <div class="eyebrow">03 · Lifecycle</div>
+      <h2>VM status, on and off</h2>
+      <p class="sub">The status values the daemon stores in memory and SQLite, and the functions that move a VM between them.</p>
+    </div>
+    <div class="panel p-3 reveal">
+      <div class="map-scroll" style="border:0;background:transparent">
+        <svg id="fsm" viewBox="0 0 800 300" role="img" aria-label="VM state machine">
+          <defs>
+            <marker id="fsm-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+              <path d="M0,0 L10,5 L0,10 z" fill="var(--muted)"></path>
+            </marker>
+          </defs>
+        </svg>
+      </div>
+      <div class="fsm-caption px-2 pt-2" id="fsm-caption"></div>
+    </div>
+  </div>
+</section>
+
+<!-- ============ ADDRESSING ============ -->
+<section class="section" id="addressing">
+  <div class="wrap">
+    <div class="section-head reveal">
+      <div class="eyebrow">04 · Addressing</div>
+      <h2>Everything comes from the slot number</h2>
+      <p class="sub">create_vm() derives each VM's network, sockets and file names from its slot with <code>base = slot × 4</code>. Move the slider to see what a slot owns.</p>
+    </div>
+    <div class="panel p-4 calc reveal">
+      <div class="row g-4 align-items-center">
+        <div class="col-lg-4">
+          <div class="text-muted-2 small mb-1">slot_id</div>
+          <div class="slot-val" id="slot-val">0</div>
+          <input type="range" class="form-range mt-3" id="slot-range" min="0" max="128" value="0" aria-label="Slot number">
+          <div class="d-flex align-items-center gap-2 mt-2">
+            <label for="slot-num" class="small text-muted-2">exact</label>
+            <input type="number" id="slot-num" class="form-control form-control-sm bg-transparent" min="0" max="16383" value="0" style="max-width:120px">
+          </div>
+          <div class="subnet-bar">
+            <div><small>network</small><span id="sb-net"></span></div>
+            <div class="gw"><small>host TAP</small><span id="sb-gw"></span></div>
+            <div class="gst"><small>guest</small><span id="sb-gst"></span></div>
+            <div><small>broadcast</small><span id="sb-bc"></span></div>
+          </div>
+        </div>
+        <div class="col-lg-8">
+          <dl class="kv mb-0">
+            <dt>base</dt><dd id="c-base"></dd>
+            <dt>subnet</dt><dd id="c-subnet"></dd>
+            <dt>host gateway</dt><dd id="c-host"></dd>
+            <dt>guest IP</dt><dd id="c-guest"></dd>
+            <dt>guest MAC</dt><dd id="c-mac"></dd>
+            <dt>Firecracker API</dt><dd id="c-api"></dd>
+            <dt>Ghost Proxy</dt><dd id="c-uds"></dd>
+            <dt>Nginx host</dt><dd id="c-host-name"></dd>
+            <dt>disk files</dt><dd id="c-files"></dd>
+          </dl>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ============ FLOWS ============ -->
+<section class="section" id="flows-section">
+  <div class="wrap">
+    <div class="section-head reveal">
+      <div class="eyebrow">05 · Flows</div>
+      <h2>Every flow, step by step</h2>
+      <p class="sub">Each diagram draws itself as you scroll: who calls whom, in order, with the function that does it. Use <b>Play on map</b> to watch the same flow on the live map.</p>
+    </div>
+    <div class="flow-nav reveal" id="flow-nav"></div>
+    <div id="flows"></div>
+  </div>
+</section>
+
+<footer>
+  <div class="wrap d-flex flex-wrap gap-3 justify-content-between">
+    <div><i class="bi bi-snow2 me-1" style="color:var(--ice)"></i> CryoSpawn flow map. Built from the daemon source in <code>internal/</code>.</div>
+    <div class="d-flex flex-wrap gap-3">
+      <a href="https://github.com/NirjharDebnath/CryoSpawn/blob/main/README.md">README</a>
+      <a href="https://github.com/NirjharDebnath/CryoSpawn/blob/main/DESIGN.md">Design</a>
+      <a href="https://github.com/NirjharDebnath/CryoSpawn/blob/main/docs/API.md">API</a>
+      <a href="https://github.com/NirjharDebnath/CryoSpawn/blob/main/docs/KNOWN-ISSUES.md">Known issues</a>
+    </div>
+  </div>
+</footer>
+
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/gsap/3.12.5/gsap.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/gsap/3.12.5/MotionPathPlugin.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/gsap/3.12.5/ScrollTrigger.min.js"></script>
+<script src="assets/js/data.js"></script>
+<script src="assets/js/map.js"></script>
+<script src="assets/js/flows.js"></script>
+<script src="assets/js/main.js"></script>
+</body>
+</html>
