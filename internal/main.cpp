@@ -28,13 +28,13 @@ int main() {
     // Restore Ghost Proxies for all adopted VMs on startup
     for (const auto& vm : manager.list_vms()) {
         if (vm.ssh_exposed) {
-            std::thread(run_ghost_proxy, "/tmp/cryo_vm_" + std::to_string(vm.id) + "_22.sock", vm.ip, 22, vm.id, wake_fn, status_fn).detach();
+            std::thread(run_ghost_proxy, "/tmp/cryo-" + manager.get_hex(vm.uuid) + "_22.sock", vm.ip, 22, vm.id, wake_fn, status_fn).detach();
         }
         if (vm.http_exposed) {
-            std::thread(run_ghost_proxy, "/tmp/cryo_vm_" + std::to_string(vm.id) + "_80.sock", vm.ip, 80, vm.id, wake_fn, status_fn).detach();
+            std::thread(run_ghost_proxy, "/tmp/cryo-" + manager.get_hex(vm.uuid) + "_80.sock", vm.ip, 80, vm.id, wake_fn, status_fn).detach();
         }
         if (vm.https_exposed) {
-            std::thread(run_ghost_proxy, "/tmp/cryo_vm_" + std::to_string(vm.id) + "_443.sock", vm.ip, 443, vm.id, wake_fn, status_fn).detach();
+            std::thread(run_ghost_proxy, "/tmp/cryo-" + manager.get_hex(vm.uuid) + "_443.sock", vm.ip, 443, vm.id, wake_fn, status_fn).detach();
         }
     }
 
@@ -43,8 +43,10 @@ int main() {
         json response_json = json::array();
         for (const auto& vm : manager.list_vms()) {
             response_json.push_back({
-                {"id", vm.id}, {"ip", vm.ip}, {"host_ip", vm.host_ip}, {"status", vm.status},
-                {"vcpus", vm.vcpus}, {"mem_mib", vm.mem_mib}, {"tap_name", vm.tap_name},
+                {"id", vm.id},
+                {"uuid", vm.uuid},
+                {"name", vm.name}, {"ip", vm.ip}, {"host_ip", vm.host_ip}, {"status", vm.status},
+                {"vcpus", vm.vcpus}, {"mem_mib", vm.mem_mib}, {"tap_name", vm.tap_name}, {"rootfs_gb", vm.rootfs_gb},
                 {"ssh_exposed", vm.ssh_exposed}, {"host_port", vm.host_port},
                 {"http_exposed", vm.http_exposed}, {"https_exposed", vm.https_exposed},
                 {"host_lan_ip", lan_ip}, {"project", vm.project_name}
@@ -57,7 +59,7 @@ int main() {
         int vcpus = 1; int mem_mib = 512; 
         bool expose_ssh = false; bool expose_http = false; bool expose_https = false;
         int rootfs_gb = 3;
-        std::string project = "default";
+        std::string project = "default"; std::string name = "";
 
         if (!req.body.empty()) {
             try {
@@ -68,13 +70,14 @@ int main() {
                 if (body.contains("expose_http")) expose_http = body["expose_http"];
                 if (body.contains("expose_https")) expose_https = body["expose_https"];
                 if (body.contains("project")) project = body["project"];
+                if (body.contains("name")) name = body["name"];
                 if (body.contains("rootfs_gb")) { rootfs_gb = body["rootfs_gb"]; }
             } catch (...) {
                 res.status = 400; res.set_content(R"({"error": "Invalid JSON"})", "application/json"); return;
             }
         }
         try {
-            MicroVM vm = manager.create_vm(vcpus, mem_mib, expose_ssh, expose_http, expose_https, project, rootfs_gb);
+            MicroVM vm = manager.create_vm(vcpus, mem_mib, expose_ssh, expose_http, expose_https, project, rootfs_gb, name);
             std::thread([&manager, vm, KERNEL_PATH, ROOTFS_PATH]() {
                 manager.configure_and_start(vm.id, KERNEL_PATH, ROOTFS_PATH);
             }).detach();
@@ -90,35 +93,34 @@ int main() {
             // Wire the Ghost Proxies
             // Wire the Ghost Proxies using Unix Domain Sockets
             if (vm.ssh_exposed) {
-                std::thread(run_ghost_proxy, "/tmp/cryo_vm_" + std::to_string(vm.id) + "_22.sock", vm.ip, 22, vm.id, wake_fn, status_fn).detach();
+                std::thread(run_ghost_proxy, "/tmp/cryo-" + manager.get_hex(vm.uuid) + "_22.sock", vm.ip, 22, vm.id, wake_fn, status_fn).detach();
             }
             if (vm.http_exposed) {
-                std::thread(run_ghost_proxy, "/tmp/cryo_vm_" + std::to_string(vm.id) + "_80.sock", vm.ip, 80, vm.id, wake_fn, status_fn).detach();
+                std::thread(run_ghost_proxy, "/tmp/cryo-" + manager.get_hex(vm.uuid) + "_80.sock", vm.ip, 80, vm.id, wake_fn, status_fn).detach();
             }
             if (vm.https_exposed) {
-                std::thread(run_ghost_proxy, "/tmp/cryo_vm_" + std::to_string(vm.id) + "_443.sock", vm.ip, 443, vm.id, wake_fn, status_fn).detach();
+                std::thread(run_ghost_proxy, "/tmp/cryo-" + manager.get_hex(vm.uuid) + "_443.sock", vm.ip, 443, vm.id, wake_fn, status_fn).detach();
             }
 
-            json response = { {"id", vm.id}, {"ip", vm.ip}, {"status", "booting"} };
+            json response = { {"id", vm.id},
+                {"uuid", vm.uuid},
+                {"name", vm.name}, {"ip", vm.ip}, {"status", "booting"} };
             res.set_content(response.dump(), "application/json");
         } catch (const std::exception& e) {
             res.status = 500; res.set_content(json{{"error", e.what()}}.dump(), "application/json");
         }
     });
 
-    svr.Post(R"(^/api/vms/(\d+)/restart$)", [&](const httplib::Request& req, httplib::Response& res) {
-        int id = std::stoi(req.matches[1]);
+    svr.Post(R"(^/api/vms/([a-zA-Z0-9-]+)/restart$)", [&](const httplib::Request& req, httplib::Response& res) {
+        int id = manager.get_slot_by_uuid(req.matches[1]);
+        if (id == -1) { res.status = 404; return; }
         manager.reboot_vm(id, KERNEL_PATH, ROOTFS_PATH);
-        std::this_thread::sleep_for(std::chrono::milliseconds(200));
-        try {
-            MicroVM vm = manager.create_vm(1, 512, false, false, false, "default", 1); 
-            std::thread([&manager, vm, KERNEL_PATH, ROOTFS_PATH]() { manager.configure_and_start(vm.id, KERNEL_PATH, ROOTFS_PATH); }).detach();
-            res.set_content(R"({"status": "restarting"})", "application/json");
-        } catch (const std::exception& e) { res.status = 500; res.set_content(json{{"error", e.what()}}.dump(), "application/json"); }
+        res.set_content(R"({"status": "restarting"})", "application/json");
     });
 
-    svr.Patch(R"(^/api/vms/(\d+)/ports$)", [&](const httplib::Request& req, httplib::Response& res) {
-        int id = std::stoi(req.matches[1]);
+    svr.Patch(R"(^/api/vms/([a-zA-Z0-9-]+)/ports$)", [&](const httplib::Request& req, httplib::Response& res) {
+        int id = manager.get_slot_by_uuid(req.matches[1]);
+        if (id == -1) { res.status = 404; return; }
         try {
             auto body = json::parse(req.body);
             bool ssh = body.value("ssh_exposed", false);
@@ -146,9 +148,11 @@ int main() {
                 return false;
             };
 
-            std::string uds_ssh = "/tmp/cryo_vm_" + std::to_string(id) + "_22.sock";
-            std::string uds_http = "/tmp/cryo_vm_" + std::to_string(id) + "_80.sock";
-            std::string uds_https = "/tmp/cryo_vm_" + std::to_string(id) + "_443.sock";
+            std::string vm_uuid = "";
+            for (auto& v : manager.list_vms()) if (v.id == id) vm_uuid = v.uuid;
+            std::string uds_ssh = "/tmp/cryo-" + manager.get_hex(vm_uuid) + "_22.sock";
+            std::string uds_http = "/tmp/cryo-" + manager.get_hex(vm_uuid) + "_80.sock";
+            std::string uds_https = "/tmp/cryo-" + manager.get_hex(vm_uuid) + "_443.sock";
 
             if (ssh && !is_ghost_proxy_running(uds_ssh)) {
                 std::thread(run_ghost_proxy, uds_ssh, vm_ip, 22, id, wake_fn, status_fn).detach();
@@ -174,15 +178,17 @@ int main() {
         }
     });
 
-    svr.Delete(R"(^/api/vms/(\d+)$)", [&](const httplib::Request& req, httplib::Response& res) {
-        int id = std::stoi(req.matches[1]); 
+    svr.Delete(R"(^/api/vms/([a-zA-Z0-9-]+)$)", [&](const httplib::Request& req, httplib::Response& res) {
+        int id = manager.get_slot_by_uuid(req.matches[1]);
+        if (id == -1) { res.status = 404; return; } 
         manager.terminate_vm(id);
         manager.db.remove_vm(id);
         res.set_content(R"({"status": "deleted"})", "application/json");
     });
 
-    svr.Post(R"(^/api/vms/(\d+)/hibernate$)", [&](const httplib::Request& req, httplib::Response& res) {
-        int id = std::stoi(req.matches[1]);
+    svr.Post(R"(^/api/vms/([a-zA-Z0-9-]+)/hibernate$)", [&](const httplib::Request& req, httplib::Response& res) {
+        int id = manager.get_slot_by_uuid(req.matches[1]);
+        if (id == -1) { res.status = 404; return; }
         if (manager.hibernate_vm(id)) {
             res.set_content(R"({"status": "hibernated"})", "application/json");
         } else {
@@ -191,8 +197,9 @@ int main() {
         }
     });
 
-    svr.Post(R"(^/api/vms/(\d+)/wake$)", [&](const httplib::Request& req, httplib::Response& res) {
-        int id = std::stoi(req.matches[1]);
+    svr.Post(R"(^/api/vms/([a-zA-Z0-9-]+)/wake$)", [&](const httplib::Request& req, httplib::Response& res) {
+        int id = manager.get_slot_by_uuid(req.matches[1]);
+        if (id == -1) { res.status = 404; return; }
         if (manager.wake_vm(id)) {
             res.set_content(R"({"status": "running"})", "application/json");
         } else {
@@ -201,8 +208,9 @@ int main() {
         }
     });
 
-    svr.Post(R"(/api/vms/(\d+)/proxy)", [&](const httplib::Request& req, httplib::Response& res) {
-        int id = std::stoi(req.matches[1]);
+    svr.Post(R"(/api/vms/([a-zA-Z0-9-]+)/proxy)", [&](const httplib::Request& req, httplib::Response& res) {
+        int id = manager.get_slot_by_uuid(req.matches[1]);
+        if (id == -1) { res.status = 404; return; }
         try {
             auto body = json::parse(req.body);
             int host_port = body["host_port"];
@@ -240,8 +248,13 @@ int main() {
     // --- NETWORK TOPOLOGY API ---
     svr.Get("/api/links", [&](const httplib::Request& req, httplib::Response& res) {
         json response = json::array();
+        auto vms = manager.list_vms();
+        auto get_uuid = [&](int id) {
+            for (auto& v : vms) if (v.id == id) return v.uuid;
+            return std::string("");
+        };
         for (const auto& link : manager.get_all_links()) {
-            response.push_back({{"vm1", link.vm1_id}, {"vm2", link.vm2_id}});
+            response.push_back({{"vm1_uuid", get_uuid(link.vm1_id)}, {"vm2_uuid", get_uuid(link.vm2_id)}});
         }
         res.set_content(response.dump(), "application/json");
     });
@@ -249,7 +262,7 @@ int main() {
     svr.Post("/api/links", [&](const httplib::Request& req, httplib::Response& res) {
         try {
             auto body = json::parse(req.body);
-            if (manager.link_microvms(body["vm1"], body["vm2"])) {
+            if (manager.link_microvms(manager.get_slot_by_uuid(body["vm1_id"]), manager.get_slot_by_uuid(body["vm2_id"]))) {
                 res.set_content(json{{"status", "linked"}}.dump(), "application/json");
             } else {
                 res.status = 400; 
@@ -261,8 +274,8 @@ int main() {
         }
     });
 
-    svr.Delete(R"(/api/links/(\d+)/(\d+))", [&](const httplib::Request& req, httplib::Response& res) {
-        manager.unlink_microvms(std::stoi(req.matches[1]), std::stoi(req.matches[2]));
+    svr.Delete(R"(/api/links/([a-zA-Z0-9-]+)/([a-zA-Z0-9-]+))", [&](const httplib::Request& req, httplib::Response& res) {
+        manager.unlink_microvms(manager.get_slot_by_uuid(req.matches[1]), manager.get_slot_by_uuid(req.matches[2]));
         res.set_content(json{{"status", "unlinked"}}.dump(), "application/json");
     });
 
@@ -299,7 +312,7 @@ int main() {
         try {
             int vol_id = std::stoi(req.matches[1]);
             auto body = json::parse(req.body);
-            int vm_id = body["vm_id"];
+            int vm_id = manager.get_slot_by_uuid(body["vm_id"]);
             
             manager.db.attach_volume(vol_id, vm_id);
             

@@ -47,6 +47,7 @@ public:
             );
             CREATE TABLE IF NOT EXISTS volumes (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
+                uuid TEXT UNIQUE,
                 name TEXT NOT NULL,
                 size_gb INTEGER NOT NULL,
                 attached_vm_id INTEGER DEFAULT -1
@@ -58,6 +59,8 @@ public:
         sqlite3_exec(db, "ALTER TABLE vms ADD COLUMN http_exposed INTEGER DEFAULT 0;", nullptr, nullptr, nullptr);
         sqlite3_exec(db, "ALTER TABLE vms ADD COLUMN https_exposed INTEGER DEFAULT 0;", nullptr, nullptr, nullptr);
         sqlite3_exec(db, "ALTER TABLE vms ADD COLUMN rootfs_gb INTEGER DEFAULT 1;", nullptr, nullptr, nullptr);
+        sqlite3_exec(db, "ALTER TABLE vms ADD COLUMN uuid TEXT;", nullptr, nullptr, nullptr);
+        sqlite3_exec(db, "ALTER TABLE vms ADD COLUMN name TEXT;", nullptr, nullptr, nullptr);
     }
 
     ~Database() { if (db) sqlite3_close(db); }
@@ -68,13 +71,14 @@ public:
         std::string tap_name; bool ssh_exposed; int host_port;
         bool http_exposed; bool https_exposed;
         std::string socket_path; std::string project_name; int rootfs_gb;
+        std::string uuid; std::string name;
     };
 
     struct LinkRow { int vm1_id; int vm2_id; };
 
     std::vector<DBRow> get_all_vms() {
         std::vector<DBRow> rows;
-        const char* sql = "SELECT slot_id, pid, status, vcpus, mem_mib, guest_ip, host_ip, tap_name, ssh_exposed, host_port, project_name, http_exposed, https_exposed, rootfs_gb FROM vms;";
+        const char* sql = "SELECT slot_id, pid, status, vcpus, mem_mib, guest_ip, host_ip, tap_name, ssh_exposed, host_port, project_name, http_exposed, https_exposed, rootfs_gb, uuid, name FROM vms;";
         sqlite3_stmt* stmt;
         
         if (sqlite3_prepare_v2(db, sql, -1, &stmt, nullptr) == SQLITE_OK) {
@@ -114,8 +118,8 @@ public:
 
     void insert_vm(int slot, pid_t pid, const std::string& status, int vcpus, int mem,
                    const std::string& g_ip, const std::string& h_ip, const std::string& tap,
-                   bool ssh, int port, const std::string& project, bool http_exposed, bool https_exposed, int rootfs_gb) {
-        const char* sql = "INSERT INTO vms (slot_id, pid, status, vcpus, mem_mib, guest_ip, host_ip, tap_name, ssh_exposed, host_port, project_name, http_exposed, https_exposed, rootfs_gb) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);";
+                   bool ssh, int port, const std::string& project, bool http_exposed, bool https_exposed, int rootfs_gb, const std::string& uuid, const std::string& name) {
+        const char* sql = "INSERT INTO vms (slot_id, pid, status, vcpus, mem_mib, guest_ip, host_ip, tap_name, ssh_exposed, host_port, project_name, http_exposed, https_exposed, rootfs_gb, uuid, name) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);";
         sqlite3_stmt* stmt;
         sqlite3_prepare_v2(db, sql, -1, &stmt, nullptr);
         
@@ -131,8 +135,18 @@ public:
         sqlite3_bind_int(stmt, 12, http_exposed ? 1 : 0);
         sqlite3_bind_int(stmt, 13, https_exposed ? 1 : 0);
         sqlite3_bind_int(stmt, 14, rootfs_gb);
+        sqlite3_bind_text(stmt, 15, uuid.c_str(), -1, SQLITE_STATIC);
+        sqlite3_bind_text(stmt, 16, name.c_str(), -1, SQLITE_STATIC);
 
         sqlite3_step(stmt); sqlite3_finalize(stmt);
+    }
+
+            void update_volume_uuid(int id, const std::string& uuid) {
+        execute_query("UPDATE volumes SET uuid = '" + uuid + "' WHERE id = " + std::to_string(id) + ";");
+    }
+    
+    void update_uuid_and_name(int slot, const std::string& uuid, const std::string& name) {
+        execute_query("UPDATE vms SET uuid = '" + uuid + "', name = '" + name + "' WHERE slot_id = " + std::to_string(slot) + ";");
     }
 
     void update_status(int slot, const std::string& status) {

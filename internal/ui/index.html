@@ -29,10 +29,15 @@
             <div class="bg-white p-6 rounded-xl border border-slate-200 shadow-sm h-fit">
                 <h2 class="text-lg font-semibold mb-4">Spawn MicroVM</h2>
                 <form id="spawn-form" class="space-y-4">
-                    <div>
-                        <label class="block text-sm font-medium text-slate-700 mb-1">Project Name</label>
-                        <input type="text" id="project-name" value="default" required class="w-full border border-slate-300 rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
-                        <p class="text-xs text-slate-400 mt-1">Isolates VMs into private network zones</p>
+                    <div class="grid grid-cols-2 gap-4">
+                        <div>
+                            <label class="block text-sm font-medium text-slate-700 mb-1">VM Name</label>
+                            <input type="text" id="vm-name" placeholder="my-server" class="w-full border border-slate-300 rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
+                        </div>
+                        <div>
+                            <label class="block text-sm font-medium text-slate-700 mb-1">Project Name</label>
+                            <input type="text" id="project-name" value="default" required class="w-full border border-slate-300 rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
+                        </div>
                     </div>
 
                     <div class="grid grid-cols-2 gap-4">

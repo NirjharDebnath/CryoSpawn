@@ -32,6 +32,14 @@ void init_cryo_firewall_baseline(const std::string& out_iface) {
 
     // 4. Drop un-NATed internal cross-talk between isolated subnets
     run_idempotent_rule("FORWARD -i cryo+ -o cryo+ -d 172.16.0.0/16 -j DROP");
+
+    // 5. Drop outbound access to the physical host's private LAN
+    run_idempotent_rule("FORWARD -i cryo+ -d 192.168.0.0/16 -j DROP");
+    run_idempotent_rule("FORWARD -i cryo+ -d 10.0.0.0/8 -j DROP");
+
+    // 6. Seal off the hypervisor (Host Laptop) from the VMs
+    run_idempotent_rule("INPUT -i cryo+ -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT");
+    run_idempotent_rule("INPUT -i cryo+ -j DROP");
 }
 
 std::string get_default_interface() {
@@ -50,8 +58,6 @@ bool setup_cryo_network(const std::string& tap_name, const std::string& host_ip,
     system(("ip addr add " + host_ip + "/30 dev " + tap_name).c_str());
     system(("ip link set " + tap_name + " up").c_str());
     system("sysctl -w net.ipv4.ip_forward=1 > /dev/null");
-    system(("iptables -t nat -A POSTROUTING -o " + out_iface + " -j MASQUERADE").c_str());
-    system("iptables -A FORWARD -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT");
     system(("iptables -A FORWARD -i " + tap_name + " -o " + out_iface + " -j ACCEPT").c_str());
     return true;
 }

@@ -20,7 +20,7 @@ CryoSpawn is designed to bridge the gap between Docker's speed and KVM's securit
                       |         HOST BROWSER / CLIENTS        |
                       +-------------------+-------------------+
                                           |
-                        HTTP / HTTPS (http://vmX.cryo)
+                        HTTP / HTTPS (http://cryo-[hex].cryo)
                                           v
                       +---------------------------------------+
                       |       Host Nginx Reverse Proxy        |
@@ -96,6 +96,12 @@ CryoSpawn is designed to bridge the gap between Docker's speed and KVM's securit
   - Auto-expand filesystem structure (`e2fsck` + `resize2fs`) while enforcing base-image math.
 
 ---
+
+### [COMPLETED] Phase 6.5: Enterprise UUID Architecture Shift
+- [x] Abstract all integer `slot` IDs into internal IP-allocation indexes.
+- [x] Migrate all external touchpoints (APIs, UI, SSH, Ingress) to use standard Cloud-Native UUIDs (e.g. `vm-a1b2c3d4`).
+- [x] Namespace all Linux host artifacts (TAP interfaces, Firecracker sockets, Elastic Volumes, RootFS files) under the strict 15-byte `IFNAMSIZ` limit using `cryo-[hex]` schemas.
+- [x] Auto-repair SQLite databases to backfill UUIDs on legacy booted environments.
 
 ### Phase 7: Multi-Tenant Authentication & Project Scoping (RBAC)
 * **Goal:** Enable multiple users to utilize CryoSpawn concurrently with strictly enforced security boundaries.

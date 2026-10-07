@@ -20,6 +20,7 @@ const volumesContainer = document.getElementById('volumes-container');
 
 let cachedVMs = [];
 let cachedVolumes = [];
+let lastRenderState = "";
 
 // Fetch VMs, Links, and Volumes concurrently
 async function fetchData() {
@@ -41,10 +42,14 @@ async function fetchData() {
         connStatus.innerHTML = `<span class="h-2 w-2 rounded-full bg-green-500 mr-2"></span> Connected`;
         connStatus.className = "flex items-center text-sm font-medium text-green-600";
 
-        renderTable(vms);
-        updateLinkSelectors(vms);
-        renderLinks(links, vms);
-        renderVolumes(volumes, vms);
+        const currentState = JSON.stringify({vms, links, volumes});
+        if (currentState !== lastRenderState) {
+            renderTable(vms);
+            updateLinkSelectors(vms);
+            renderLinks(links, vms);
+            renderVolumes(volumes, vms);
+            lastRenderState = currentState;
+        }
     } catch (error) {
         connStatus.innerHTML = `<span class="h-2 w-2 rounded-full bg-red-500 mr-2"></span> Offline`;
         connStatus.className = "flex items-center text-sm font-medium text-red-600";
@@ -66,10 +71,10 @@ function renderTable(vms) {
         <tr class="hover:bg-slate-50 transition-colors">
             <td class="px-6 py-4 whitespace-nowrap">
                 <div class="font-medium text-slate-900 flex items-center space-x-2">
-                    <span>VM ${vm.id}</span>
+                    <span>${vm.name || 'VM ' + vm.id}</span>
                     <span class="text-xs bg-slate-100 text-slate-600 px-2 py-0.5 rounded font-mono">${vm.project || 'default'}</span>
                 </div>
-                <div class="text-xs text-slate-400 font-mono mt-0.5">${vm.tap_name}</div>
+                <div class="text-xs text-slate-400 font-mono mt-0.5">${vm.uuid} | ${vm.tap_name}</div>
             </td>
             <td class="px-6 py-4 whitespace-nowrap">
                 ${(() => {
@@ -94,7 +99,7 @@ function renderTable(vms) {
                 ${vm.ssh_exposed ? `
                     <div class="mt-2 flex items-center space-x-2">
                         <span class="text-xs bg-slate-100 px-1.5 py-0.5 rounded font-mono text-slate-500 border border-slate-200">Port 22</span>
-                        <button onclick='copySSH(this, ${vm.id})' class="text-xs bg-blue-50 text-blue-600 hover:bg-blue-100 px-2 py-1 rounded border border-blue-200 transition-colors flex items-center" title="Copy SSH Command">
+                        <button onclick="copySSH(this, '${vm.uuid}')" class="text-xs bg-blue-50 text-blue-600 hover:bg-blue-100 px-2 py-1 rounded border border-blue-200 transition-colors flex items-center" title="Copy SSH Command">
                             <svg class="w-3 h-3 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z"></path></svg>
                             Copy SSH Command
                         </button>
@@ -102,25 +107,25 @@ function renderTable(vms) {
                 ` : ''}
                 ${vm.http_exposed ? `
                     <div class="mt-1 text-xs bg-slate-100 p-1 rounded font-mono text-green-600 inline-block select-all" title="Nginx Ingress">
-                        http://vm${vm.id}.cryo
+                        http://cryo-${vm.uuid.substring(3)}.cryo
                     </div><br>
                 ` : ''}
                 ${vm.https_exposed ? `
                     <div class="mt-1 text-xs bg-slate-100 p-1 rounded font-mono text-green-600 inline-block select-all" title="Nginx Ingress">
-                        https://vm${vm.id}.cryo
+                        https://cryo-${vm.uuid.substring(3)}.cryo
                     </div>
                 ` : ''}
                 <div class="mt-2 flex items-center space-x-3 text-xs border-t border-slate-100 pt-2">
                     <label class="flex items-center space-x-1 cursor-pointer">
-                        <input type="checkbox" onchange="updatePorts(${vm.id}, this.checked, ${vm.http_exposed}, ${vm.https_exposed})" ${vm.ssh_exposed ? 'checked' : ''} class="rounded border-slate-300 text-blue-600 focus:ring-blue-500 cursor-pointer">
+                        <input type="checkbox" onchange="updatePorts('${vm.uuid}', this.checked, ${vm.http_exposed}, ${vm.https_exposed})" ${vm.ssh_exposed ? 'checked' : ''} class="rounded border-slate-300 text-blue-600 focus:ring-blue-500 cursor-pointer">
                         <span class="text-slate-600 font-medium">SSH</span>
                     </label>
                     <label class="flex items-center space-x-1 cursor-pointer">
-                        <input type="checkbox" onchange="updatePorts(${vm.id}, ${vm.ssh_exposed}, this.checked, ${vm.https_exposed})" ${vm.http_exposed ? 'checked' : ''} class="rounded border-slate-300 text-blue-600 focus:ring-blue-500 cursor-pointer">
+                        <input type="checkbox" onchange="updatePorts('${vm.uuid}', ${vm.ssh_exposed}, this.checked, ${vm.https_exposed})" ${vm.http_exposed ? 'checked' : ''} class="rounded border-slate-300 text-blue-600 focus:ring-blue-500 cursor-pointer">
                         <span class="text-slate-600 font-medium">HTTP</span>
                     </label>
                     <label class="flex items-center space-x-1 cursor-pointer">
-                        <input type="checkbox" onchange="updatePorts(${vm.id}, ${vm.ssh_exposed}, ${vm.http_exposed}, this.checked)" ${vm.https_exposed ? 'checked' : ''} class="rounded border-slate-300 text-blue-600 focus:ring-blue-500 cursor-pointer">
+                        <input type="checkbox" onchange="updatePorts('${vm.uuid}', ${vm.ssh_exposed}, ${vm.http_exposed}, this.checked)" ${vm.https_exposed ? 'checked' : ''} class="rounded border-slate-300 text-blue-600 focus:ring-blue-500 cursor-pointer">
                         <span class="text-slate-600 font-medium">HTTPS</span>
                     </label>
                 </div>
@@ -130,16 +135,16 @@ function renderTable(vms) {
             </td>
             <td class="px-6 py-4 whitespace-nowrap text-right space-x-2">
                 ${vm.status === 'running' ? `
-                    <button onclick="hibernateVM(${vm.id})" class="text-purple-600 hover:text-purple-800 hover:bg-purple-50 px-3 py-1 rounded transition-colors text-sm font-medium">
+                    <button onclick="hibernateVM('${vm.uuid}')" class="text-purple-600 hover:text-purple-800 hover:bg-purple-50 px-3 py-1 rounded transition-colors text-sm font-medium">
                         Hibernate
                     </button>
                 ` : ''}
                 ${vm.status === 'hibernated' ? `
-                    <button onclick="wakeVM(${vm.id})" class="text-green-600 hover:text-green-800 hover:bg-green-50 px-3 py-1 rounded transition-colors text-sm font-medium">
+                    <button onclick="wakeVM('${vm.uuid}')" class="text-green-600 hover:text-green-800 hover:bg-green-50 px-3 py-1 rounded transition-colors text-sm font-medium">
                         Wake
                     </button>
                 ` : ''}
-                <button onclick="deleteVM(${vm.id})" class="text-red-500 hover:text-red-700 hover:bg-red-50 px-3 py-1 rounded transition-colors text-sm font-medium">
+                <button onclick="deleteVM('${vm.uuid}')" class="text-red-500 hover:text-red-700 hover:bg-red-50 px-3 py-1 rounded transition-colors text-sm font-medium">
                     Destroy
                 </button>
             </td>
@@ -154,7 +159,7 @@ function updateLinkSelectors(vms) {
     const prev2 = linkVm2.value;
 
     const options = runningVMs.map(vm => 
-        `<option value="${vm.id}">VM ${vm.id} (${vm.project || 'default'} - ${vm.ip})</option>`
+        `<option value="${vm.uuid}">${vm.name || 'VM ' + vm.id} (${vm.project || 'default'} - ${vm.ip})</option>`
     ).join('');
 
     linkVm1.innerHTML = options;
@@ -205,6 +210,7 @@ spawnForm.addEventListener('submit', async (e) => {
 
     const payload = {
         project: document.getElementById('project-name').value.trim() || 'default',
+        name: document.getElementById('vm-name').value.trim(),
         vcpus: parseInt(document.getElementById('vcpus').value),
         mem_mib: parseInt(document.getElementById('ram').value),
         expose_ssh: document.getElementById('expose-ssh').checked,
@@ -232,10 +238,10 @@ spawnForm.addEventListener('submit', async (e) => {
 // Link Form Handler
 linkForm.addEventListener('submit', async (e) => {
     e.preventDefault();
-    const vm1 = parseInt(linkVm1.value);
-    const vm2 = parseInt(linkVm2.value);
+    const vm1_id = linkVm1.value;
+    const vm2_id = linkVm2.value;
 
-    if (isNaN(vm1) || isNaN(vm2) || vm1 === vm2) {
+    if (!vm1_id || !vm2_id || vm1_id === vm2_id) {
         alert("Please select two different VMs to bridge.");
         return;
     }
@@ -244,7 +250,7 @@ linkForm.addEventListener('submit', async (e) => {
         const res = await fetch(LINKS_API_URL, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ vm1, vm2 })
+            body: JSON.stringify({ vm1_id, vm2_id })
         });
         if (!res.ok) {
             const err = await res.json();
@@ -257,10 +263,10 @@ linkForm.addEventListener('submit', async (e) => {
 });
 
 // Delete VM
-async function deleteVM(id) {
-    if (!confirm(`Are you sure you want to destroy VM ${id}?`)) return;
+async function deleteVM(uuid) {
+    if (!confirm(`Are you sure you want to destroy this VM?`)) return;
     try {
-        await fetch(`${API_URL}/${id}`, { method: 'DELETE' });
+        await fetch(`${API_URL}/${uuid}`, { method: 'DELETE' });
         fetchData();
     } catch {
         alert("Failed to terminate VM.");
@@ -268,9 +274,9 @@ async function deleteVM(id) {
 }
 
 // Hibernate VM
-async function hibernateVM(id) {
+async function hibernateVM(uuid) {
     try {
-        await fetch(`${API_URL}/${id}/hibernate`, { method: 'POST' });
+        await fetch(`${API_URL}/${uuid}/hibernate`, { method: 'POST' });
         fetchData();
     } catch {
         alert("Failed to hibernate VM.");
@@ -278,9 +284,9 @@ async function hibernateVM(id) {
 }
 
 // Wake VM
-async function wakeVM(id) {
+async function wakeVM(uuid) {
     try {
-        await fetch(`${API_URL}/${id}/wake`, { method: 'POST' });
+        await fetch(`${API_URL}/${uuid}/wake`, { method: 'POST' });
         fetchData();
     } catch {
         alert("Failed to wake VM.");
@@ -288,9 +294,9 @@ async function wakeVM(id) {
 }
 
 // Update VM Ports
-async function updatePorts(id, ssh, http, https) {
+async function updatePorts(uuid, ssh, http, https) {
     try {
-        await fetch(`${API_URL}/${id}/ports`, {
+        await fetch(`${API_URL}/${uuid}/ports`, {
             method: 'PATCH',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ ssh_exposed: ssh, http_exposed: http, https_exposed: https })
@@ -324,7 +330,7 @@ function renderVolumes(volumes, vms) {
         if (el && el.value) prevSelections[vol.id] = el.value;
     });
 
-    const vmOptions = vms.map(v => `<option value="${v.id}">VM ${v.id} (${v.ip})</option>`).join('');
+    const vmOptions = vms.map(v => `<option value="${v.uuid}">${v.name || "VM " + v.id} (${v.ip})</option>`).join('');
 
     volumesContainer.innerHTML = volumes.map(vol => {
         const attached = vol.attached_vm_id !== -1;
@@ -412,31 +418,31 @@ if (volumeForm) {
     });
 }
 
-async function deleteVolume(id) {
-    if (!confirm(`Are you sure you want to permanently delete Volume ${id}? All data will be lost!`)) return;
+async function deleteVolume(volUuid) {
+    if (!confirm(`Are you sure you want to permanently delete this Volume? All data will be lost!`)) return;
     try {
-        await fetch(`${VOLUMES_API_URL}/${id}`, { method: 'DELETE' });
+        await fetch(`${VOLUMES_API_URL}/${volUuid}`, { method: 'DELETE' });
         fetchData();
     } catch {
         alert("Failed to delete volume.");
     }
 }
 
-async function attachVolume(volId) {
-    const select = document.getElementById(`attach-select-${volId}`);
+async function attachVolume(volUuid) {
+    const select = document.getElementById(`attach-select-${volUuid}`);
     const vmId = select.value;
     if (!vmId) {
         alert("Please select a VM first.");
         return;
     }
     
-    if (!confirm(`Attaching this volume will REBOOT the target VM (VM ${vmId}). Unsaved RAM state will be lost. Proceed?`)) return;
+    if (!confirm(`Attaching this volume will REBOOT the target VM. Unsaved RAM state will be lost. Proceed?`)) return;
 
     try {
-        await fetch(`${VOLUMES_API_URL}/${volId}/attach`, {
+        await fetch(`${VOLUMES_API_URL}/${volUuid}/attach`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ vm_id: parseInt(vmId) })
+            body: JSON.stringify({ vm_id: vmId })
         });
         fetchData();
     } catch {
@@ -444,10 +450,10 @@ async function attachVolume(volId) {
     }
 }
 
-async function detachVolume(volId) {
+async function detachVolume(volUuid) {
     if (!confirm(`Detaching this volume will REBOOT the target VM. Proceed?`)) return;
     try {
-        await fetch(`${VOLUMES_API_URL}/${volId}/detach`, { method: 'POST' });
+        await fetch(`${VOLUMES_API_URL}/${volUuid}/detach`, { method: 'POST' });
         fetchData();
     } catch {
         alert("Failed to detach volume.");
@@ -455,8 +461,9 @@ async function detachVolume(volId) {
 }
 
 // Copy SSH command
-function copySSH(btn, id) {
-    const cmd = `ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ProxyCommand="nc -U /tmp/cryo_vm_${id}_22.sock" root@localhost`;
+function copySSH(btn, uuid) {
+    const hex = uuid.substring(3);
+    const cmd = `ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ProxyCommand="nc -U /tmp/cryo-${hex}_22.sock" root@localhost`;
     navigator.clipboard.writeText(cmd).then(() => {
         const originalHtml = btn.innerHTML;
         btn.innerHTML = `<svg class="w-3 h-3 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"></path></svg> Copied!`;

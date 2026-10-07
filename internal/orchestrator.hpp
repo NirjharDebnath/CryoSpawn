@@ -11,6 +11,8 @@
 #include <fcntl.h>
 #include <iomanip>
 #include <sstream>
+#include <random>
+#include <unordered_set>
 
 #include "api.hpp"
 #include "network.hpp"
@@ -19,6 +21,8 @@
 namespace fs = std::filesystem;
 
 struct MicroVM {
+    std::string uuid;
+    std::string name;
     int id = 0;
     pid_t pid = 0;
     std::string ip = ""; 
@@ -43,6 +47,16 @@ private:
     std::unordered_map<pid_t, int> pid_to_slot;
     std::mutex mtx;
 
+    std::string generate_vol_id() {
+        std::random_device rd;
+        std::mt19937 gen(rd()); 
+        std::uniform_int_distribution<> dis(0, 15);
+        const char* hex_chars = "0123456789abcdef";
+        std::string id = "vol-";
+        for (int i = 0; i < 8; ++i) id += hex_chars[dis(gen)];
+        return id;
+    }
+
     std::string generate_mac(int slot) {
         std::stringstream ss;
         ss << "AA:FC:AC:10:" << std::setfill('0') << std::setw(2) << std::hex << (slot / 256) << ":" << std::setfill('0') << std::setw(2) << std::hex << (slot % 256);
@@ -51,13 +65,39 @@ private:
 
 public:
     Database db;
+    std::unordered_set<std::string> active_uuids;
+
+    std::string get_hex(const std::string& id) {
+        if (id.length() > 3 && id.substr(0,3) == "vm-") return id.substr(3);
+        if (id.length() > 4 && id.substr(0,4) == "vol-") return id.substr(4);
+        return id;
+    }
+
+    std::string generate_vm_id() {
+        std::random_device rd;
+        std::mt19937 gen(rd()); 
+        std::uniform_int_distribution<> dis(0, 15);
+        const char* hex_chars = "0123456789abcdef";
+        std::string id = "vm-";
+        for (int i = 0; i < 8; ++i) id += hex_chars[dis(gen)];
+        return id;
+    }
+
+    int get_slot_by_uuid(const std::string& uuid) {
+        std::lock_guard<std::mutex> lock(mtx);
+        for (const auto& [slot, vm] : vms) {
+            if (vm.uuid == uuid) return slot;
+        }
+        return -1;
+    }
+
 
     void cleanup_vm_resources(MicroVM& vm) {
         std::cout << "[*] Cleaning up resources for VM " << vm.id << "...\n";
         auto links = db.get_all_links();
         for (const auto& link : links) {
-            if (link.vm1_id == vm.id) unlink_taps(vm.tap_name, "cryo" + std::to_string(link.vm2_id));
-            if (link.vm2_id == vm.id) unlink_taps(vm.tap_name, "cryo" + std::to_string(link.vm1_id));
+            if (link.vm1_id == vm.id && vms.count(link.vm2_id)) unlink_taps(vm.tap_name, vms[link.vm2_id].tap_name);
+            if (link.vm2_id == vm.id && vms.count(link.vm1_id)) unlink_taps(vm.tap_name, vms[link.vm1_id].tap_name);
         }
         teardown_cryo_network(vm.tap_name);
         if (vm.ssh_exposed) unexpose_vm_port(active_iface, vm.host_port, vm.ip, 22);
@@ -65,9 +105,9 @@ public:
 
         // Delete the unique rootfs disk for this VM to free SSD space
         std::string base_dir = "/home/nirjhar/Python Codes/Einstein/CryoSpawn/instances";
-        std::string vm_rootfs = base_dir + "/vm_" + std::to_string(vm.id) + "_rootfs.ext4";
-        std::string vm_snap = base_dir + "/vm_" + std::to_string(vm.id) + "_state.snap";
-        std::string vm_mem = base_dir + "/vm_" + std::to_string(vm.id) + "_mem.ram";
+        std::string vm_rootfs = base_dir + "/cryo-" + get_hex(vm.uuid) + "_rootfs.ext4";
+        std::string vm_snap = base_dir + "/cryo-" + get_hex(vm.uuid) + "_state.snap";
+        std::string vm_mem = base_dir + "/cryo-" + get_hex(vm.uuid) + "_mem.ram";
 
         if (std::filesystem::exists(vm_rootfs)) {
             std::filesystem::remove(vm_rootfs);
@@ -83,9 +123,9 @@ public:
         }
 
         // Clean up Unix Domain Sockets for Ghost Proxy
-        unlink(("/tmp/cryo_vm_" + std::to_string(vm.id) + "_22.sock").c_str());
-        unlink(("/tmp/cryo_vm_" + std::to_string(vm.id) + "_80.sock").c_str());
-        unlink(("/tmp/cryo_vm_" + std::to_string(vm.id) + "_443.sock").c_str());
+        unlink(("/tmp/cryo-" + get_hex(vm.uuid) + "_22.sock").c_str());
+        unlink(("/tmp/cryo-" + get_hex(vm.uuid) + "_80.sock").c_str());
+        unlink(("/tmp/cryo-" + get_hex(vm.uuid) + "_443.sock").c_str());
 
         db.remove_vm(vm.id);
     }
@@ -112,6 +152,14 @@ public:
                 vm.host_port = r.host_port;
                 vm.project_name = r.project_name; 
                 vm.socket_path = r.socket_path;
+                vm.uuid = r.uuid;
+                vm.name = r.name;
+                if (vm.uuid.empty()) {
+                    vm.uuid = generate_vm_id();
+                    if (vm.name.empty()) vm.name = "legacy-vm-" + std::to_string(r.slot);
+                    db.update_uuid_and_name(vm.id, vm.uuid, vm.name);
+                }
+                active_uuids.insert(vm.uuid);
                 vms[r.slot] = vm; 
                 pid_to_slot[r.pid] = r.slot;
             } else {
@@ -148,7 +196,7 @@ public:
                             pid_to_slot.erase(pid);
                         } else {
                             cleanup_vm_resources(vms[slot]);
-                            vms.erase(slot); pid_to_slot.erase(pid);
+                            active_uuids.erase(vms[slot].uuid); vms.erase(slot); pid_to_slot.erase(pid);
                         }
                     }
                 }
@@ -183,15 +231,20 @@ public:
         start_reaper();
     }
 
-    MicroVM create_vm(int vcpus, int mem_mib, bool expose_ssh, bool expose_http, bool expose_https, const std::string& project, int rootfs_gb) {
+    MicroVM create_vm(int vcpus, int mem_mib, bool expose_ssh, bool expose_http, bool expose_https, const std::string& project, int rootfs_gb, const std::string& name) {
         std::lock_guard<std::mutex> lock(mtx);
         int slot = db.get_next_free_slot(); int base = slot * 4;
         
         MicroVM vm; vm.id = slot;
+        vm.name = name;
+        do {
+            vm.uuid = generate_vm_id();
+        } while (active_uuids.find(vm.uuid) != active_uuids.end());
+        active_uuids.insert(vm.uuid);
         vm.host_ip = "172.16." + std::to_string(base / 256) + "." + std::to_string((base % 256) + 1);
         vm.ip = "172.16." + std::to_string(base / 256) + "." + std::to_string((base % 256) + 2);
-        vm.mac = generate_mac(slot); vm.tap_name = "cryo" + std::to_string(slot);
-        vm.socket_path = "/tmp/cryo_" + std::to_string(slot) + ".socket";
+        vm.mac = generate_mac(slot); vm.tap_name = "cryo-" + get_hex(vm.uuid);
+        vm.socket_path = "/tmp/cryo-" + get_hex(vm.uuid) + ".socket";
         vm.vcpus = vcpus; vm.mem_mib = mem_mib; vm.status = "booting";
         vm.ssh_exposed = expose_ssh; 
         vm.http_exposed = expose_http;
@@ -213,7 +266,7 @@ public:
         }
 
         vm.pid = pid; vms[vm.id] = vm; pid_to_slot[pid] = vm.id;
-        db.insert_vm(slot, pid, "booting", vcpus, mem_mib, vm.ip, vm.host_ip, vm.tap_name, expose_ssh, vm.host_port, project, expose_http, expose_https, rootfs_gb);
+        db.insert_vm(slot, pid, "booting", vcpus, mem_mib, vm.ip, vm.host_ip, vm.tap_name, expose_ssh, vm.host_port, project, expose_http, expose_https, rootfs_gb, vm.uuid, vm.name);
         return vm;
     }
 
@@ -238,7 +291,8 @@ public:
 
         // 1. Create a unique rootfs copy for this VM
         std::filesystem::path base_path(rootfs);
-        std::filesystem::path vm_rootfs = std::filesystem::path("/home/nirjhar/Python Codes/Einstein/CryoSpawn/instances") / ("vm_" + std::to_string(id) + "_rootfs.ext4");
+        std::string vm_uuid = vms[id].uuid;
+        std::filesystem::path vm_rootfs = std::filesystem::path("/home/nirjhar/Python Codes/Einstein/CryoSpawn/instances") / ("cryo-" + get_hex(vm_uuid) + "_rootfs.ext4");
         
         try {
             if (!std::filesystem::exists(vm_rootfs)) {
@@ -344,13 +398,14 @@ public:
             kill(vms[id].pid, SIGKILL);
         } else if (vms[id].status == "hibernated") {
             cleanup_vm_resources(vms[id]);
-            vms.erase(id);
+            active_uuids.erase(vms[id].uuid); vms.erase(id);
         }
     }
 
     bool hibernate_vm(int id) {
-        std::string snap_path = "/home/nirjhar/Python Codes/Einstein/CryoSpawn/instances/vm_" + std::to_string(id) + "_state.snap";
-        std::string mem_path = "/home/nirjhar/Python Codes/Einstein/CryoSpawn/instances/vm_" + std::to_string(id) + "_mem.ram";
+        std::string vm_uuid = vms[id].uuid;
+        std::string snap_path = "/home/nirjhar/Python Codes/Einstein/CryoSpawn/instances/cryo-" + get_hex(vm_uuid) + "_state.snap";
+        std::string mem_path = "/home/nirjhar/Python Codes/Einstein/CryoSpawn/instances/cryo-" + get_hex(vm_uuid) + "_mem.ram";
         
         {
             std::lock_guard<std::mutex> lock(mtx);
@@ -393,8 +448,9 @@ public:
             vm = vms[id];
         }
 
-        std::string snap_path = "/home/nirjhar/Python Codes/Einstein/CryoSpawn/instances/vm_" + std::to_string(id) + "_state.snap";
-        std::string mem_path = "/home/nirjhar/Python Codes/Einstein/CryoSpawn/instances/vm_" + std::to_string(id) + "_mem.ram";
+        std::string vm_uuid = vms[id].uuid;
+        std::string snap_path = "/home/nirjhar/Python Codes/Einstein/CryoSpawn/instances/cryo-" + get_hex(vm_uuid) + "_state.snap";
+        std::string mem_path = "/home/nirjhar/Python Codes/Einstein/CryoSpawn/instances/cryo-" + get_hex(vm_uuid) + "_mem.ram";
 
         // 1. Start a fresh Firecracker process
         unlink(vm.socket_path.c_str());

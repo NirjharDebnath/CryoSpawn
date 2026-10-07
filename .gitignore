@@ -2,8 +2,8 @@
 .venv
 rootfs
 vmlinux
-instances
+# instances
 downloads
-volumes
+# volumes
 squashfs-root
 ubuntu-24.04.id_rsa

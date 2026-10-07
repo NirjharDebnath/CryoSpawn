@@ -130,12 +130,12 @@ Stores extra ext4 disks (Elastic Storage Volumes) that can be attached to a VM.
 
 | Column Name | SQL Type | Description / Purpose |
 | :--- | :--- | :--- |
-| `id` | `INTEGER PRIMARY KEY AUTOINCREMENT` | Volume ID. The disk file is `volumes/vol_<id>.ext4`. |
+| `id` | `INTEGER PRIMARY KEY AUTOINCREMENT` | Volume ID. The disk file is `volumes/cryo-<hex>.ext4`. |
 | `name` | `TEXT` | Human-readable name. |
 | `size_gb` | `INTEGER` | Size in GB. |
-| `attached_vm_id` | `INTEGER DEFAULT -1` | Slot ID of the VM using the volume, or `-1` when detached. |
+| `attached_cryo-id` | `INTEGER DEFAULT -1` | Slot ID of the VM using the volume, or `-1` when detached. |
 
-Volumes are created with `truncate` + `mkfs.ext4`. `configure_and_start()` attaches every volume whose `attached_vm_id` matches the VM as an extra Firecracker drive (`PUT /drives/vol_<id>`). Attaching or detaching reboots a running VM so the drive change takes effect.
+Volumes are created with `truncate` + `mkfs.ext4`. `configure_and_start()` attaches every volume whose `attached_cryo-id` matches the VM as an extra Firecracker drive (`PUT /drives/cryo-<hex>`). Attaching or detaching reboots a running VM so the drive change takes effect.
 
 ---
 
@@ -224,13 +224,13 @@ Normally, when programs talk to each other over a network, they use TCP ports (`
 - Can collide with other programs you have running.
 - Can be probed by other devices on your Wi-Fi network.
 
-A **Unix Domain Socket** is a file on your disk (like `/tmp/cryo_vm_0_80.sock`) that behaves like a network connection. It has no port number, runs completely inside kernel memory, is faster than TCP, and is 100% isolated to your machine.
+A **Unix Domain Socket** is a file on your disk (like `/tmp/cryo-da05a06c_80.sock`) that behaves like a network connection. It has no port number, runs completely inside kernel memory, is faster than TCP, and is 100% isolated to your machine.
 
 #### How Ghost Proxy Works
 For every exposed service on a VM, CryoSpawn spins up a lightweight C++ background thread running `run_ghost_proxy()`:
-- Port 22 -> `/tmp/cryo_vm_<id>_22.sock`
-- Port 80 -> `/tmp/cryo_vm_<id>_80.sock`
-- Port 443 -> `/tmp/cryo_vm_<id>_443.sock`
+- Port 22 -> `/tmp/cryo-<hex>_22.sock`
+- Port 80 -> `/tmp/cryo-<hex>_80.sock`
+- Port 443 -> `/tmp/cryo-<hex>_443.sock`
 
 The proxy thread sits on `accept()`. When any byte arrives on that socket:
 1. It queries: *"Is VM `<id>` hibernated?"*
@@ -241,17 +241,17 @@ The proxy thread sits on `accept()`. When any byte arrives on that socket:
 
 ### Nginx Ingress (`vmX.cryo`) & Local DNS
 
-How does typing `http://vm0.cryo` in your browser hit the right Unix Socket?
+How does typing `http://cryo-da05a06c.cryo` in your browser hit the right Unix Socket?
 
 ```
-[ Browser: http://vm0.cryo ]
+[ Browser: http://cryo-da05a06c.cryo ]
            |
            v (Localhost 127.0.0.1 via /etc/hosts)
 [ Host Nginx Port 80 ]
-  Rule: server_name ~^vm(?<vmid>\d+)\.cryo$;
+  Rule: server_name ~^cryo-(?<hex>[a-f0-9]+)\.cryo$;
            |
            v Extracts $vmid = 0
-  proxy_pass http://unix:/tmp/cryo_vm_0_80.sock;
+  proxy_pass http://unix:/tmp/cryo-da05a06c_80.sock;
            |
            v
 [ Ghost Proxy ] ---> (Wakes VM if needed) ---> [ VM Internal Web Server ]
@@ -259,24 +259,24 @@ How does typing `http://vm0.cryo` in your browser hit the right Unix Socket?
 
 1. **Local DNS:** Your `/etc/hosts` file contains:
    ```
-   127.0.0.1 vm0.cryo vm1.cryo
+   127.0.0.1 cryo-da05a06c.cryo vm1.cryo
    ```
-   When you browse to `vm0.cryo`, your laptop resolves it to `127.0.0.1` (itself).
+   When you browse to `cryo-da05a06c.cryo`, your laptop resolves it to `127.0.0.1` (itself).
 2. **Nginx Wildcard Regex:** In `/etc/nginx/conf.d/cryospawn.conf`:
    ```nginx
    server {
        listen 80;
-       server_name ~^vm(?<vmid>\d+)\.cryo$;
+       server_name ~^cryo-(?<hex>[a-f0-9]+)\.cryo$;
 
        location / {
-           proxy_pass http://unix:/tmp/cryo_vm_${vmid}_80.sock;
+           proxy_pass http://unix:/tmp/cryo-${hex}_80.sock;
            proxy_set_header Host $host;
            proxy_set_header X-Real-IP $remote_addr;
            proxy_http_version 1.1;
        }
    }
    ```
-   Nginx captures the number in the domain name (e.g. `vm0` -> `vmid = 0`) and automatically passes the connection directly into `/tmp/cryo_vm_0_80.sock`!
+   Nginx captures the number in the domain name (e.g. `cryo-da05a06c` -> `hex = da05a06c`) and automatically passes the connection directly into `/tmp/cryo-da05a06c_80.sock`!
 
 ---
 
@@ -285,12 +285,12 @@ Because SSH does not have HTTP host headers, how do you SSH into a VM without op
 Using OpenSSH's built-in **`ProxyCommand`** and `netcat` (`nc`):
 
 ```bash
-ssh -o ProxyCommand="nc -U /tmp/cryo_vm_0_22.sock" root@localhost
+ssh -o ProxyCommand="nc -U /tmp/cryo-da05a06c_22.sock" root@localhost
 ```
 
 **What this command does:**
 - `ssh` starts up on your laptop.
-- Instead of opening a TCP connection to port 22, it executes `nc -U /tmp/cryo_vm_0_22.sock`.
+- Instead of opening a TCP connection to port 22, it executes `nc -U /tmp/cryo-da05a06c_22.sock`.
 - Netcat connects directly to the Unix Domain Socket.
 - Ghost Proxy detects the connection, wakes VM 0 if it was sleeping, and connects to the VM's internal SSH server (`172.16.0.2:22`).
 - You are logged into root shell!
@@ -333,16 +333,16 @@ When you click **"Initialize VM"** in the web dashboard:
 [orchestrator.hpp: configure_and_start()] (runs in background thread)
        |-- 1. Waits for /tmp/cryo_0.socket to appear
        |-- 2. PUT /boot-source (passes ubuntu-vmlinux.bin + kernel boot args)
-       |-- 3. Copies rootfs/ubuntu-rootfs.ext4 -> instances/vm_0_rootfs.ext4 (Copy-on-Write isolation)
+       |-- 3. Copies rootfs/ubuntu-rootfs.ext4 -> instances/cryo-0_rootfs.ext4 (Copy-on-Write isolation)
        |      If rootfs_gb >= 3: truncate -s <N>G, e2fsck -fy, resize2fs (grows the disk)
-       |-- 4. PUT /drives/rootfs (attaches instances/vm_0_rootfs.ext4)
+       |-- 4. PUT /drives/rootfs (attaches instances/cryo-0_rootfs.ext4)
        |-- 5. PUT /network-interfaces/eth0 (attaches tap device cryo0)
        |-- 6. PUT /machine-config (sets vCPUs and RAM)
        |-- 7. PUT /actions {"action_type": "InstanceStart"} -> KVM executes Linux kernel!
        v
 [main.cpp: Spawns Ghost Proxy Threads]
-       |-- Spawns thread running run_ghost_proxy("/tmp/cryo_vm_0_80.sock", ...)
-       |-- Spawns thread running run_ghost_proxy("/tmp/cryo_vm_0_22.sock", ...)
+       |-- Spawns thread running run_ghost_proxy("/tmp/cryo-da05a06c_80.sock", ...)
+       |-- Spawns thread running run_ghost_proxy("/tmp/cryo-da05a06c_22.sock", ...)
        v
 [MicroVM is Running and Ready!]
 ```
@@ -360,8 +360,8 @@ When you click **"Hibernate"** (or auto-idle triggers):
        |-- 1. Acquires std::lock_guard<std::mutex> lock(mtx)
        |-- 2. PATCH /vm {"state": "Paused"} -> Instantly freezes VM CPU execution
        |-- 3. PUT /snapshot/create {
-       |         "snapshot_path": "instances/vm_0_state.snap",
-       |         "mem_file_path": "instances/vm_0_mem.ram"
+       |         "snapshot_path": "instances/cryo-0_state.snap",
+       |         "mem_file_path": "instances/cryo-0_mem.ram"
        |      } -> Dumps full RAM and CPU state to disk
        |-- 4. Sets vms[0].status = "hibernated" & updates SQLite
        |-- 5. kill(vms[0].pid, SIGTERM) -> Kills Firecracker process
@@ -377,7 +377,7 @@ When you click **"Hibernate"** (or auto-idle triggers):
 ---
 
 ### Flow 3: The Magic Auto-Wake (Ghost Proxy in Action)
-The VM is hibernated. You open your browser and navigate to `http://vm0.cryo`:
+The VM is hibernated. You open your browser and navigate to `http://cryo-da05a06c.cryo`:
 
 ```mermaid
 sequenceDiagram
@@ -388,8 +388,8 @@ sequenceDiagram
     participant F as Firecracker
     participant V as VM web server
 
-    B->>N: GET http://vm0.cryo
-    N->>P: /tmp/cryo_vm_0_80.sock
+    B->>N: GET http://cryo-da05a06c.cryo
+    N->>P: /tmp/cryo-da05a06c_80.sock
     P->>P: status_fn(0) is hibernated
     P->>M: wake_vm(0)
     M->>M: status = "waking" (lock blocks concurrent wakes)
@@ -416,14 +416,14 @@ When you click **"Destroy"** in the UI:
        v (DELETE /api/vms/0)
 [orchestrator.hpp: terminate_vm(0)]
        |-- 1. Sends SIGTERM / SIGKILL to Firecracker PID (if running)
-       |-- 2. cleanup_vm_resources(vm):
+       |-- 2. cleanup_cryo-resources(vm):
        |      - unlinks Firecracker API socket (/tmp/cryo_0.socket)
-       |      - unlinks instances/vm_0_rootfs.ext4 (frees SSD disk space)
-       |      - unlinks instances/vm_0_state.snap (frees snapshot space)
-       |      - unlinks instances/vm_0_mem.ram (frees memory dump)
-       |      - unlinks /tmp/cryo_vm_0_22.sock (cleans Ghost Proxy)
-       |      - unlinks /tmp/cryo_vm_0_80.sock (cleans Ghost Proxy)
-       |      - unlinks /tmp/cryo_vm_0_443.sock (cleans Ghost Proxy)
+       |      - unlinks instances/cryo-0_rootfs.ext4 (frees SSD disk space)
+       |      - unlinks instances/cryo-0_state.snap (frees snapshot space)
+       |      - unlinks instances/cryo-0_mem.ram (frees memory dump)
+       |      - unlinks /tmp/cryo-da05a06c_22.sock (cleans Ghost Proxy)
+       |      - unlinks /tmp/cryo-da05a06c_80.sock (cleans Ghost Proxy)
+       |      - unlinks /tmp/cryo-da05a06c_443.sock (cleans Ghost Proxy)
        |      - teardown_cryo_network("cryo0"): deletes TAP interface & iptables rules
        |      - db.remove_vm(0): Deletes record from SQLite
        v
@@ -451,8 +451,8 @@ The full endpoint reference, with request and response fields, lives in [docs/AP
 - `reconcile_state()`: Runs on daemon startup. Scans the SQLite database, checks if previously registered PIDs are alive, adopts them into memory, and restarts their Ghost Proxies.
 
 ### In `internal/proxy.hpp`:
-- `run_ghost_proxy(uds_path, vm_ip, vm_port, vm_id, wake_fn, status_fn)`: Creates and binds an `AF_UNIX` stream socket on disk (`chmod 0666` so Nginx can access it). Loops on `accept()` and spawns detached client handler threads.
-- `handle_proxy_client(client_sock, vm_ip, vm_port, vm_id, wake_fn, status_fn)`: Checks if the target VM is currently asleep. If so, triggers `wake_vm(vm_id)` and waits for it to become ready. Then connects to the VM's internal IP:Port and launches bidirectional data relays.
+- `run_ghost_proxy(uds_path, cryo-ip, cryo-port, cryo-id, wake_fn, status_fn)`: Creates and binds an `AF_UNIX` stream socket on disk (`chmod 0666` so Nginx can access it). Loops on `accept()` and spawns detached client handler threads.
+- `handle_proxy_client(client_sock, cryo-ip, cryo-port, cryo-id, wake_fn, status_fn)`: Checks if the target VM is currently asleep. If so, triggers `wake_vm(cryo-id)` and waits for it to become ready. Then connects to the VM's internal IP:Port and launches bidirectional data relays.
 - `relay_data(sock1, sock2)`: High-performance bidirectional streaming loop that pipes raw bytes between the Unix socket and the VM TCP socket.
 
 ### In `internal/network.hpp`:
@@ -471,11 +471,11 @@ CryoSpawn/
 ├── ROADMAP.md                     # Platform vision & phased engineering roadmap
 ├── DESIGN.md                      # This document (Architecture & Design)
 ├── docs/                          # SETUP.md (build & run), API.md (HTTP reference)
-├── volumes/                       # Attachable disks: vol_<id>.ext4
+├── volumes/                       # Attachable disks: cryo-<hex>.ext4
 ├── instances/                     # Per-VM dynamic instance files
-│   ├── vm_0_rootfs.ext4          # Copy-on-Write disk image for VM 0
-│   ├── vm_0_state.snap           # CPU registers & device state snapshot
-│   └── vm_0_mem.ram              # RAM memory snapshot file
+│   ├── cryo-0_rootfs.ext4          # Copy-on-Write disk image for VM 0
+│   ├── cryo-0_state.snap           # CPU registers & device state snapshot
+│   └── cryo-0_mem.ram              # RAM memory snapshot file
 ├── internal/                      # C++ Orchestrator & Backend source code
 │   ├── main.cpp                  # Daemon entry point & HTTP REST API server
 │   ├── orchestrator.hpp          # MicroVM lifecycle engine & process manager
@@ -492,10 +492,10 @@ CryoSpawn/
 ├── vmlinux/
 │   └── ubuntu-vmlinux.bin        # Uncompressed Linux kernel binary
 ├── utils/
-│   └── start_vm_server.sh        # Guest test script for HTTP/HTTPS web servers
+│   └── start_cryo-server.sh        # Guest test script for HTTP/HTTPS web servers
 └── /tmp/ (System Temporary Directory)
     ├── cryo_0.socket             # Firecracker API control socket for VM 0
-    ├── cryo_vm_0_22.sock         # Ghost Proxy Unix Socket for SSH
-    ├── cryo_vm_0_80.sock         # Ghost Proxy Unix Socket for HTTP
-    └── cryo_vm_0_443.sock        # Ghost Proxy Unix Socket for HTTPS
+    ├── cryo-da05a06c_22.sock         # Ghost Proxy Unix Socket for SSH
+    ├── cryo-da05a06c_80.sock         # Ghost Proxy Unix Socket for HTTP
+    └── cryo-da05a06c_443.sock        # Ghost Proxy Unix Socket for HTTPS
 ```
