@@ -49,11 +49,33 @@ The daemon:
 
 1. Detects the default network interface and installs the firewall baseline.
 2. Opens (or creates) `cryospawn.db` in the current directory and re-adopts VMs recorded there.
-3. Serves the dashboard and API on `http://localhost:8080`.
+3. Serves the dashboard on `http://localhost:8080` (the only port to expose, e.g. through a tunnel) and keeps the API on `127.0.0.1:9090`.
 
 Run it from the same directory each time, because the database path is relative.
 
 Open `http://localhost:8080` for the dashboard, or use the [HTTP API](API.md).
+
+## ☁️ Share the dashboard with a Cloudflare tunnel
+
+Only the dashboard port (`8080`) is meant to be exposed. The API on `127.0.0.1:9090` stays local, and the dashboard forwards `/api/*` to it.
+
+1. Start the daemon (terminal 1):
+
+   ```bash
+   cd internal
+   sudo ./cryospawn
+   ```
+
+2. Open a quick tunnel to the dashboard port (terminal 2):
+
+   ```bash
+   cloudflared tunnel --url http://localhost:8080
+   ```
+
+3. Share the `https://<random-words>.trycloudflare.com` URL that `cloudflared` prints.
+
+> [!WARNING]
+> Never tunnel port `9090`. Anyone with the tunnel URL can still control all VMs through `/api/*`, because there is no login. See [KNOWN-ISSUES.md](KNOWN-ISSUES.md).
 
 ## 🌐 Reach a VM from the host
 

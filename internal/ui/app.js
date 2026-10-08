@@ -1,6 +1,6 @@
-const API_URL = 'http://localhost:8080/api/vms';
-const LINKS_API_URL = 'http://localhost:8080/api/links';
-const VOLUMES_API_URL = 'http://localhost:8080/api/volumes';
+const API_URL = '/api/vms';
+const LINKS_API_URL = '/api/links';
+const VOLUMES_API_URL = '/api/volumes';
 
 // DOM Elements
 const vmTableBody = document.getElementById('vm-table-body');

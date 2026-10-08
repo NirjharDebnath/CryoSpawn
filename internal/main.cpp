@@ -361,8 +361,42 @@ int main() {
     });
     svr.Options(".*", [](const httplib::Request&, httplib::Response& res) { res.status = 200; });
 
-    std::cout << "[*] CryoSpawn Daemon running on http://localhost:8080\n";
-    svr.set_mount_point("/", "/home/nirjhar/Python Codes/Einstein/CryoSpawn/internal/ui");
-    svr.listen("0.0.0.0", 8080);
+    // Backend (REST API) is bound to loopback only, so it is never reachable from outside this machine.
+    const int BACKEND_PORT = 9090;
+    // Frontend serves the dashboard and forwards /api/* to the backend. Only this port needs to be exposed.
+    const int FRONTEND_PORT = 8080;
+
+    std::thread([&svr, BACKEND_PORT]() { svr.listen("127.0.0.1", BACKEND_PORT); }).detach();
+
+    httplib::Server web;
+    web.set_mount_point("/", "/home/nirjhar/Python Codes/Einstein/CryoSpawn/internal/ui");
+    web.Options(R"(/api/.*)", [](const httplib::Request&, httplib::Response& res) { res.status = 200; });
+    auto forward = [BACKEND_PORT](const httplib::Request& req, httplib::Response& res) {
+        httplib::Client backend("127.0.0.1", BACKEND_PORT);
+        backend.set_read_timeout(60);
+        httplib::Request out;
+        out.method = req.method;
+        out.path = req.target;
+        out.body = req.body;
+        auto ct = req.get_header_value("Content-Type");
+        if (!ct.empty()) out.set_header("Content-Type", ct);
+        auto result = backend.send(out);
+        if (!result) {
+            res.status = 502;
+            res.set_content(json{{"error", "backend unavailable"}}.dump(), "application/json");
+            return;
+        }
+        res.status = result->status;
+        res.set_content(result->body, result->get_header_value("Content-Type"));
+    };
+    web.Get(R"(/api/.*)", forward);
+    web.Post(R"(/api/.*)", forward);
+    web.Patch(R"(/api/.*)", forward);
+    web.Delete(R"(/api/.*)", forward);
+
+    std::cout << "[*] CryoSpawn dashboard on http://0.0.0.0:" << FRONTEND_PORT
+              << " (API on 127.0.0.1:" << BACKEND_PORT << ", local only)
+";
+    web.listen("0.0.0.0", FRONTEND_PORT);
     return 0;
 }

@@ -39,10 +39,10 @@ The handler calls `reboot_vm(id, ...)` and then `create_vm(1, 512, false, false,
 
 ### 4. No authentication on the API
 
-The daemon listens on `0.0.0.0:8080`, allows every origin through CORS (`Access-Control-Allow-Origin: *`), and has no login. It runs as root and manages firewall rules.
+The API listens on `127.0.0.1:9090`; the dashboard and an `/api/*` forwarder listen on `0.0.0.0:8080`. The API allows every origin through CORS (`Access-Control-Allow-Origin: *`), and has no login. It runs as root and manages firewall rules.
 
 > [!WARNING]
-> Do not run it on an untrusted network. Block port 8080 from outside the machine, or bind to localhost.
+> Do not run it on an untrusted network. Block port 8080 from outside the machine, or tunnel only 8080 and keep 9090 local.
 
 ### 5. `host_port` is ignored by `POST /api/vms/:id/proxy`
 

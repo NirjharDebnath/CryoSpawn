@@ -2,7 +2,7 @@
 
 > **Written for:** developers and operators who call the CryoSpawn daemon directly (scripts, `curl`, the dashboard frontend).
 
-The daemon serves a JSON REST API on `http://0.0.0.0:8080`. The same server also serves the web dashboard from `internal/ui/`. Routes are defined in [internal/main.cpp](../internal/main.cpp).
+The daemon serves a JSON REST API on `http://127.0.0.1:9090` (local only). A second listener on `0.0.0.0:8080` serves the web dashboard from `internal/ui/` and forwards `/api/*` to the API, so `http://localhost:8080/api/...` also works. Routes are defined in [internal/main.cpp](../internal/main.cpp).
 
 ## 📋 Conventions
 
@@ -10,7 +10,7 @@ The daemon serves a JSON REST API on `http://0.0.0.0:8080`. The same server also
 - Errors return a non-2xx status and a body like `{"error": "..."}`.
 - CORS is open: every response carries `Access-Control-Allow-Origin: *`.
 - `:id` is the VM **slot ID** (0, 1, 2, ...), see [DESIGN.md](../DESIGN.md#3-database-design-the-systems-memory).
-- There is no authentication. Do not expose port 8080 to untrusted networks.
+- There is no authentication. Expose only port 8080 (dashboard), never 9090. Anyone who can reach 8080 can still use the API through it.
 
 ## 🖥️ MicroVMs
 
