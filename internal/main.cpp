@@ -1,8 +1,9 @@
 #include <iostream>
 #include <filesystem>
 #include <thread>
-#include "httplib.h"
-#include "json.hpp"
+#include "lib/httplib.h"
+#include "lib/json.hpp"
+#include "config.hpp"
 #include "orchestrator.hpp"
 #include "proxy.hpp"
 
@@ -10,8 +11,8 @@ using json = nlohmann::json;
 namespace fs = std::filesystem;
 
 int main() {
-    std::string KERNEL_PATH = "/home/nirjhar/Python Codes/Einstein/CryoSpawn/vmlinux/ubuntu-vmlinux.bin";
-    std::string ROOTFS_PATH = "/home/nirjhar/Python Codes/Einstein/CryoSpawn/rootfs/ubuntu-rootfs.ext4";
+    std::string KERNEL_PATH = config::BASE_PATH + "/vmlinux/ubuntu-vmlinux.bin";
+    std::string ROOTFS_PATH = config::BASE_PATH + "/rootfs/ubuntu-rootfs.ext4";
 
     VMManager manager;
     httplib::Server svr;
@@ -38,10 +39,26 @@ int main() {
         }
     }
 
-    svr.Get("/api/vms", [&](const httplib::Request& req, httplib::Response& res) {
+        // Helper lambda for authenticating Python proxy requests
+    auto authenticate = [](const httplib::Request& req, httplib::Response& res, int& user_id, bool& is_admin) -> bool {
+        if (!req.has_header("X-User-ID")) {
+            res.status = 401;
+            res.set_content(R"({"error": "Unauthorized. Missing X-User-ID from Python."})", "application/json");
+            return false;
+        }
+        user_id = std::stoi(req.get_header_value("X-User-ID"));
+        is_admin = (req.has_header("X-Role") && req.get_header_value("X-Role") == "admin");
+        return true;
+    };
+
+    // Returns all active VMs. The dashboard calls this every 2 seconds to refresh the UI.
+svr.Get("/api/vms", [&](const httplib::Request& req, httplib::Response& res) {
+        int user_id; bool is_admin;
+        if (!authenticate(req, res, user_id, is_admin)) return;
+
         std::string lan_ip = get_lan_ip(manager.active_iface);
         json response_json = json::array();
-        for (const auto& vm : manager.list_vms()) {
+        for (const auto& vm : manager.list_vms(user_id, is_admin)) {
             response_json.push_back({
                 {"id", vm.id},
                 {"uuid", vm.uuid},
@@ -55,7 +72,11 @@ int main() {
         res.set_content(response_json.dump(), "application/json");
     });
 
-    svr.Post("/api/vms", [&](const httplib::Request& req, httplib::Response& res) {
+    // Spawns a brand new microVM! Called when you fill out the "Create VM" form.
+svr.Post("/api/vms", [&](const httplib::Request& req, httplib::Response& res) {
+        int user_id; bool is_admin;
+        if (!authenticate(req, res, user_id, is_admin)) return;
+
         int vcpus = 1; int mem_mib = 512; 
         bool expose_ssh = false; bool expose_http = false; bool expose_https = false;
         int rootfs_gb = 3;
@@ -112,15 +133,26 @@ int main() {
     });
 
     svr.Post(R"(^/api/vms/([a-zA-Z0-9-]+)/restart$)", [&](const httplib::Request& req, httplib::Response& res) {
+        int user_id; bool is_admin;
+        if (!authenticate(req, res, user_id, is_admin)) return;
+        
         int id = manager.get_slot_by_uuid(req.matches[1]);
         if (id == -1) { res.status = 404; return; }
+        if (!is_admin && !manager.user_owns_vm(id, user_id)) { res.status = 403; return; }
+
         manager.reboot_vm(id, KERNEL_PATH, ROOTFS_PATH);
         res.set_content(R"({"status": "restarting"})", "application/json");
     });
 
-    svr.Patch(R"(^/api/vms/([a-zA-Z0-9-]+)/ports$)", [&](const httplib::Request& req, httplib::Response& res) {
+    // Dynamically opens or closes SSH/HTTP ports by spinning up/down Ghost Proxies.
+svr.Patch(R"(^/api/vms/([a-zA-Z0-9-]+)/ports$)", [&](const httplib::Request& req, httplib::Response& res) {
+        int user_id; bool is_admin;
+        if (!authenticate(req, res, user_id, is_admin)) return;
+        
         int id = manager.get_slot_by_uuid(req.matches[1]);
         if (id == -1) { res.status = 404; return; }
+        if (!is_admin && !manager.user_owns_vm(id, user_id)) { res.status = 403; return; }
+
         try {
             auto body = json::parse(req.body);
             bool ssh = body.value("ssh_exposed", false);
@@ -178,7 +210,8 @@ int main() {
         }
     });
 
-    svr.Delete(R"(^/api/vms/([a-zA-Z0-9-]+)$)", [&](const httplib::Request& req, httplib::Response& res) {
+    // Nukes a VM from existence. Deletes the disk and kills the Ghost Proxy.
+svr.Delete(R"(^/api/vms/([a-zA-Z0-9-]+)$)", [&](const httplib::Request& req, httplib::Response& res) {
         int id = manager.get_slot_by_uuid(req.matches[1]);
         if (id == -1) { res.status = 404; return; } 
         manager.terminate_vm(id);
@@ -186,9 +219,15 @@ int main() {
         res.set_content(R"({"status": "deleted"})", "application/json");
     });
 
-    svr.Post(R"(^/api/vms/([a-zA-Z0-9-]+)/hibernate$)", [&](const httplib::Request& req, httplib::Response& res) {
+    // Freezes the VM to disk. Saves RAM into a snapshot file.
+svr.Post(R"(^/api/vms/([a-zA-Z0-9-]+)/hibernate$)", [&](const httplib::Request& req, httplib::Response& res) {
+        int user_id; bool is_admin;
+        if (!authenticate(req, res, user_id, is_admin)) return;
+        
         int id = manager.get_slot_by_uuid(req.matches[1]);
         if (id == -1) { res.status = 404; return; }
+        if (!is_admin && !manager.user_owns_vm(id, user_id)) { res.status = 403; return; }
+
         if (manager.hibernate_vm(id)) {
             res.set_content(R"({"status": "hibernated"})", "application/json");
         } else {
@@ -197,9 +236,15 @@ int main() {
         }
     });
 
-    svr.Post(R"(^/api/vms/([a-zA-Z0-9-]+)/wake$)", [&](const httplib::Request& req, httplib::Response& res) {
+    // Thaws a frozen VM back into RAM. Resumes execution instantly.
+svr.Post(R"(^/api/vms/([a-zA-Z0-9-]+)/wake$)", [&](const httplib::Request& req, httplib::Response& res) {
+        int user_id; bool is_admin;
+        if (!authenticate(req, res, user_id, is_admin)) return;
+        
         int id = manager.get_slot_by_uuid(req.matches[1]);
         if (id == -1) { res.status = 404; return; }
+        if (!is_admin && !manager.user_owns_vm(id, user_id)) { res.status = 403; return; }
+
         if (manager.wake_vm(id)) {
             res.set_content(R"({"status": "running"})", "application/json");
         } else {
@@ -209,8 +254,13 @@ int main() {
     });
 
     svr.Post(R"(/api/vms/([a-zA-Z0-9-]+)/proxy)", [&](const httplib::Request& req, httplib::Response& res) {
+        int user_id; bool is_admin;
+        if (!authenticate(req, res, user_id, is_admin)) return;
+        
         int id = manager.get_slot_by_uuid(req.matches[1]);
         if (id == -1) { res.status = 404; return; }
+        if (!is_admin && !manager.user_owns_vm(id, user_id)) { res.status = 403; return; }
+
         try {
             auto body = json::parse(req.body);
             int host_port = body["host_port"];
@@ -361,42 +411,11 @@ int main() {
     });
     svr.Options(".*", [](const httplib::Request&, httplib::Response& res) { res.status = 200; });
 
-    // Backend (REST API) is bound to loopback only, so it is never reachable from outside this machine.
+    // The C++ daemon is now a pure REST API on port 9090.
+    // The Flask Python frontend on port 8080 will handle all UI and proxying.
     const int BACKEND_PORT = 9090;
-    // Frontend serves the dashboard and forwards /api/* to the backend. Only this port needs to be exposed.
-    const int FRONTEND_PORT = 8080;
-
-    std::thread([&svr, BACKEND_PORT]() { svr.listen("127.0.0.1", BACKEND_PORT); }).detach();
-
-    httplib::Server web;
-    web.set_mount_point("/", "/home/nirjhar/Python Codes/Einstein/CryoSpawn/internal/ui");
-    web.Options(R"(/api/.*)", [](const httplib::Request&, httplib::Response& res) { res.status = 200; });
-    auto forward = [BACKEND_PORT](const httplib::Request& req, httplib::Response& res) {
-        httplib::Client backend("127.0.0.1", BACKEND_PORT);
-        backend.set_read_timeout(60);
-        httplib::Request out;
-        out.method = req.method;
-        out.path = req.target;
-        out.body = req.body;
-        auto ct = req.get_header_value("Content-Type");
-        if (!ct.empty()) out.set_header("Content-Type", ct);
-        auto result = backend.send(out);
-        if (!result) {
-            res.status = 502;
-            res.set_content(json{{"error", "backend unavailable"}}.dump(), "application/json");
-            return;
-        }
-        res.status = result->status;
-        res.set_content(result->body, result->get_header_value("Content-Type"));
-    };
-    web.Get(R"(/api/.*)", forward);
-    web.Post(R"(/api/.*)", forward);
-    web.Patch(R"(/api/.*)", forward);
-    web.Delete(R"(/api/.*)", forward);
-
-    std::cout << "[*] CryoSpawn dashboard on http://0.0.0.0:" << FRONTEND_PORT
-              << " (API on 127.0.0.1:" << BACKEND_PORT << ", local only)
-";
-    web.listen("0.0.0.0", FRONTEND_PORT);
+    
+    std::cout << "[*] CryoSpawn Daemon (C++) pure REST API running on 127.0.0.1:" << BACKEND_PORT << "\n";
+    svr.listen("127.0.0.1", BACKEND_PORT);
     return 0;
 }

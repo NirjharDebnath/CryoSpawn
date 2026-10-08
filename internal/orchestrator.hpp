@@ -16,11 +16,13 @@
 
 #include "api.hpp"
 #include "network.hpp"
+#include "config.hpp"
 #include "database.hpp" 
 
 namespace fs = std::filesystem;
 
 struct MicroVM {
+    int owner_id;
     std::string uuid;
     std::string name;
     int id = 0;
@@ -92,7 +94,8 @@ public:
     }
 
 
-    void cleanup_vm_resources(MicroVM& vm) {
+    // The janitor. Sweeps up all the network taps, sockets, and deletes the ext4 disk.
+void cleanup_vm_resources(MicroVM& vm) {
         std::cout << "[*] Cleaning up resources for VM " << vm.id << "...\n";
         auto links = db.get_all_links();
         for (const auto& link : links) {
@@ -104,7 +107,7 @@ public:
         unlink(vm.socket_path.c_str());
 
         // Delete the unique rootfs disk for this VM to free SSD space
-        std::string base_dir = "/home/nirjhar/Python Codes/Einstein/CryoSpawn/instances";
+        std::string base_dir = config::BASE_PATH + "/instances";
         std::string vm_rootfs = base_dir + "/cryo-" + get_hex(vm.uuid) + "_rootfs.ext4";
         std::string vm_snap = base_dir + "/cryo-" + get_hex(vm.uuid) + "_state.snap";
         std::string vm_mem = base_dir + "/cryo-" + get_hex(vm.uuid) + "_mem.ram";
@@ -134,7 +137,7 @@ public:
         std::cout << "[*] Reconciling state from database...\n";
         auto records = db.get_all_vms();
         for (const auto& r : records) {
-            if (kill(r.pid, 0) == 0) {
+            if (kill(r.pid, 0) == 0 || r.status == "hibernated") {
                 std::cout << "[+] Adopted running VM " << r.slot << " (PID " << r.pid << ")\n";
                 MicroVM vm;
                 vm.id = r.slot; 
@@ -154,6 +157,7 @@ public:
                 vm.socket_path = r.socket_path;
                 vm.uuid = r.uuid;
                 vm.name = r.name;
+                vm.owner_id = r.owner_id;
                 if (vm.uuid.empty()) {
                     vm.uuid = generate_vm_id();
                     if (vm.name.empty()) vm.name = "legacy-vm-" + std::to_string(r.slot);
@@ -225,13 +229,14 @@ public:
     VMManager() {
         active_iface = get_default_interface();
         init_cryo_firewall_baseline(active_iface);
-        std::filesystem::create_directories("/home/nirjhar/Python Codes/Einstein/CryoSpawn/instances");
-        std::filesystem::create_directories("/home/nirjhar/Python Codes/Einstein/CryoSpawn/volumes");
+        std::filesystem::create_directories(config::BASE_PATH + "/instances");
+        std::filesystem::create_directories(config::BASE_PATH + "/volumes");
         reconcile_state(); 
         start_reaper();
     }
 
-    MicroVM create_vm(int vcpus, int mem_mib, bool expose_ssh, bool expose_http, bool expose_https, const std::string& project, int rootfs_gb, const std::string& name) {
+    // Provisions the basic info for a new VM (IP, UUID, etc) and saves it to SQLite.
+MicroVM create_vm(int vcpus, int mem_mib, bool expose_ssh, bool expose_http, bool expose_https, const std::string& project, int rootfs_gb, const std::string& name) {
         std::lock_guard<std::mutex> lock(mtx);
         int slot = db.get_next_free_slot(); int base = slot * 4;
         
@@ -270,7 +275,8 @@ public:
         return vm;
     }
 
-    bool configure_and_start(int id, const std::string& kernel, const std::string& rootfs) {
+    // The heavy lifter. Clones the rootfs, fires up Firecracker, and boots the Linux kernel.
+bool configure_and_start(int id, const std::string& kernel, const std::string& rootfs) {
         MicroVM vm;
         {
             std::lock_guard<std::mutex> lock(mtx);
@@ -292,7 +298,7 @@ public:
         // 1. Create a unique rootfs copy for this VM
         std::filesystem::path base_path(rootfs);
         std::string vm_uuid = vms[id].uuid;
-        std::filesystem::path vm_rootfs = std::filesystem::path("/home/nirjhar/Python Codes/Einstein/CryoSpawn/instances") / ("cryo-" + get_hex(vm_uuid) + "_rootfs.ext4");
+        std::filesystem::path vm_rootfs = std::filesystem::path(config::BASE_PATH + "/instances") / ("cryo-" + get_hex(vm_uuid) + "_rootfs.ext4");
         
         try {
             if (!std::filesystem::exists(vm_rootfs)) {
@@ -319,7 +325,7 @@ public:
         auto all_vols = db.get_volumes();
         for (const auto& vol : all_vols) {
             if (vol.attached_vm_id == id) {
-                std::string vol_path = "/home/nirjhar/Python Codes/Einstein/CryoSpawn/volumes/vol_" + std::to_string(vol.id) + ".ext4";
+                std::string vol_path = config::BASE_PATH + "/volumes/vol_" + std::to_string(vol.id) + ".ext4";
                 std::string vol_payload = "{\"drive_id\": \"vol_" + std::to_string(vol.id) + "\", \"path_on_host\": \"" + vol_path + "\", \"is_root_device\": false, \"is_read_only\": false}";
                 if (!send_firecracker_put(vm.socket_path, "/drives/vol_" + std::to_string(vol.id), vol_payload)) {
                     std::cerr << "[-] Failed to attach volume " << vol.id << " to VM " << id << "\n";
@@ -402,10 +408,11 @@ public:
         }
     }
 
-    bool hibernate_vm(int id) {
+    // Talks to the Firecracker API to pause the microVM and dump its state.
+bool hibernate_vm(int id) {
         std::string vm_uuid = vms[id].uuid;
-        std::string snap_path = "/home/nirjhar/Python Codes/Einstein/CryoSpawn/instances/cryo-" + get_hex(vm_uuid) + "_state.snap";
-        std::string mem_path = "/home/nirjhar/Python Codes/Einstein/CryoSpawn/instances/cryo-" + get_hex(vm_uuid) + "_mem.ram";
+        std::string snap_path = config::BASE_PATH + "/instances/cryo-" + get_hex(vm_uuid) + "_state.snap";
+        std::string mem_path = config::BASE_PATH + "/instances/cryo-" + get_hex(vm_uuid) + "_mem.ram";
         
         {
             std::lock_guard<std::mutex> lock(mtx);
@@ -438,7 +445,8 @@ public:
         }
     }
 
-    bool wake_vm(int id) {
+    // Restores the microVM from the dumped state snapshot. Fast boot magic!
+bool wake_vm(int id) {
         MicroVM vm;
         {
             std::lock_guard<std::mutex> lock(mtx);
@@ -449,8 +457,8 @@ public:
         }
 
         std::string vm_uuid = vms[id].uuid;
-        std::string snap_path = "/home/nirjhar/Python Codes/Einstein/CryoSpawn/instances/cryo-" + get_hex(vm_uuid) + "_state.snap";
-        std::string mem_path = "/home/nirjhar/Python Codes/Einstein/CryoSpawn/instances/cryo-" + get_hex(vm_uuid) + "_mem.ram";
+        std::string snap_path = config::BASE_PATH + "/instances/cryo-" + get_hex(vm_uuid) + "_state.snap";
+        std::string mem_path = config::BASE_PATH + "/instances/cryo-" + get_hex(vm_uuid) + "_mem.ram";
 
         // 1. Start a fresh Firecracker process
         unlink(vm.socket_path.c_str());
@@ -495,7 +503,7 @@ public:
     // --- Volumes ---
     int create_volume(const std::string& name, int size_gb) {
         int vol_id = db.insert_volume(name, size_gb);
-        std::string vol_path = "/home/nirjhar/Python Codes/Einstein/CryoSpawn/volumes/vol_" + std::to_string(vol_id) + ".ext4";
+        std::string vol_path = config::BASE_PATH + "/volumes/vol_" + std::to_string(vol_id) + ".ext4";
         
         std::string cmd1 = "truncate -s " + std::to_string(size_gb) + "G \"" + vol_path + "\"";
         std::string cmd2 = "mkfs.ext4 -F \"" + vol_path + "\" > /dev/null 2>&1";
@@ -507,16 +515,27 @@ public:
     }
 
     void delete_volume(int vol_id) {
-        std::string vol_path = "/home/nirjhar/Python Codes/Einstein/CryoSpawn/volumes/vol_" + std::to_string(vol_id) + ".ext4";
+        std::string vol_path = config::BASE_PATH + "/volumes/vol_" + std::to_string(vol_id) + ".ext4";
         unlink(vol_path.c_str());
         db.remove_volume(vol_id);
     }
 
-    std::vector<MicroVM> list_vms() {
+    std::vector<MicroVM> list_vms(int user_id = 1, bool is_admin = true) {
         std::lock_guard<std::mutex> lock(mtx);
         std::vector<MicroVM> list;
-        for (const auto& pair : vms) list.push_back(pair.second);
+        for (const auto& pair : vms) {
+            if (is_admin || pair.second.owner_id == user_id) {
+                list.push_back(pair.second);
+            }
+        }
         return list;
+    }
+
+
+    bool user_owns_vm(int id, int user_id) {
+        std::lock_guard<std::mutex> lock(mtx);
+        if (vms.find(id) == vms.end()) return false;
+        return vms[id].owner_id == user_id;
     }
 
     bool link_microvms(int id1, int id2) {

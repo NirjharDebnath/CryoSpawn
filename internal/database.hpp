@@ -27,6 +27,7 @@ public:
         std::string ddl = R"(
             CREATE TABLE IF NOT EXISTS vms (
                 slot_id INTEGER PRIMARY KEY,
+                owner_id INTEGER DEFAULT 1,
                 pid INTEGER,
                 status TEXT NOT NULL,
                 vcpus INTEGER NOT NULL,
@@ -40,6 +41,7 @@ public:
             );
             CREATE TABLE IF NOT EXISTS network_links (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
+                owner_id INTEGER DEFAULT 1,
                 project_name TEXT NOT NULL,
                 vm1_id INTEGER NOT NULL,
                 vm2_id INTEGER NOT NULL,
@@ -47,13 +49,19 @@ public:
             );
             CREATE TABLE IF NOT EXISTS volumes (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
+                owner_id INTEGER DEFAULT 1,
                 uuid TEXT UNIQUE,
                 name TEXT NOT NULL,
                 size_gb INTEGER NOT NULL,
                 attached_vm_id INTEGER DEFAULT -1
             );
         )";
-        execute_query(ddl);
+                execute_query(ddl);
+        // SQLite Migrations (Ignore errors if column already exists)
+        try { execute_query("ALTER TABLE vms ADD COLUMN owner_id INTEGER DEFAULT 1;"); } catch(...) {}
+        try { execute_query("ALTER TABLE network_links ADD COLUMN owner_id INTEGER DEFAULT 1;"); } catch(...) {}
+        try { execute_query("ALTER TABLE volumes ADD COLUMN owner_id INTEGER DEFAULT 1;"); } catch(...) {}
+
 
         // Safe alterations to add new columns if they don't exist
         sqlite3_exec(db, "ALTER TABLE vms ADD COLUMN http_exposed INTEGER DEFAULT 0;", nullptr, nullptr, nullptr);
@@ -66,6 +74,7 @@ public:
     ~Database() { if (db) sqlite3_close(db); }
 
     struct DBRow {
+        int owner_id;
         int slot; pid_t pid; std::string status;
         int vcpus; int mem_mib; std::string guest_ip; std::string host_ip;
         std::string tap_name; bool ssh_exposed; int host_port;
@@ -76,12 +85,15 @@ public:
 
     struct LinkRow { int vm1_id; int vm2_id; };
 
-    std::vector<DBRow> get_all_vms() {
+    std::vector<DBRow> get_all_vms(int user_id = 1, bool is_admin = true) {
         std::vector<DBRow> rows;
-        const char* sql = "SELECT slot_id, pid, status, vcpus, mem_mib, guest_ip, host_ip, tap_name, ssh_exposed, host_port, project_name, http_exposed, https_exposed, rootfs_gb, uuid, name FROM vms;";
+        // The Vault checks identity: Admins see all, Users see only their own.
+        std::string sql = "SELECT slot_id, pid, status, vcpus, mem_mib, guest_ip, host_ip, tap_name, ssh_exposed, host_port, project_name, http_exposed, https_exposed, rootfs_gb, uuid, name, owner_id FROM vms WHERE owner_id = ? OR ? = 1;";
         sqlite3_stmt* stmt;
         
-        if (sqlite3_prepare_v2(db, sql, -1, &stmt, nullptr) == SQLITE_OK) {
+        if (sqlite3_prepare_v2(db, sql.c_str(), -1, &stmt, nullptr) == SQLITE_OK) {
+            sqlite3_bind_int(stmt, 1, user_id);
+            sqlite3_bind_int(stmt, 2, is_admin ? 1 : 0);
             while (sqlite3_step(stmt) == SQLITE_ROW) {
                 DBRow r;
                 r.slot = sqlite3_column_int(stmt, 0);
@@ -98,7 +110,10 @@ public:
                 r.http_exposed = sqlite3_column_int(stmt, 11);
                 r.https_exposed = sqlite3_column_int(stmt, 12);
                 r.rootfs_gb = sqlite3_column_count(stmt) > 13 ? sqlite3_column_int(stmt, 13) : 1;
-                r.socket_path = "/tmp/cryo_" + std::to_string(r.slot) + ".socket";
+                r.uuid = sqlite3_column_count(stmt) > 14 && sqlite3_column_text(stmt, 14) ? reinterpret_cast<const char*>(sqlite3_column_text(stmt, 14)) : "";
+                r.name = sqlite3_column_count(stmt) > 15 && sqlite3_column_text(stmt, 15) ? reinterpret_cast<const char*>(sqlite3_column_text(stmt, 15)) : "";
+                r.owner_id = sqlite3_column_count(stmt) > 16 ? sqlite3_column_int(stmt, 16) : 1;
+                r.socket_path = "/tmp/cryo_" + r.uuid + ".socket";
                 rows.push_back(r);
             }
             sqlite3_finalize(stmt);
@@ -118,8 +133,8 @@ public:
 
     void insert_vm(int slot, pid_t pid, const std::string& status, int vcpus, int mem,
                    const std::string& g_ip, const std::string& h_ip, const std::string& tap,
-                   bool ssh, int port, const std::string& project, bool http_exposed, bool https_exposed, int rootfs_gb, const std::string& uuid, const std::string& name) {
-        const char* sql = "INSERT INTO vms (slot_id, pid, status, vcpus, mem_mib, guest_ip, host_ip, tap_name, ssh_exposed, host_port, project_name, http_exposed, https_exposed, rootfs_gb, uuid, name) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);";
+                   bool ssh, int port, const std::string& project, bool http_exposed, bool https_exposed, int rootfs_gb, const std::string& uuid, const std::string& name, int owner_id = 1) {
+        const char* sql = "INSERT INTO vms (slot_id, pid, status, vcpus, mem_mib, guest_ip, host_ip, tap_name, ssh_exposed, host_port, project_name, http_exposed, https_exposed, rootfs_gb, uuid, name, owner_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);";
         sqlite3_stmt* stmt;
         sqlite3_prepare_v2(db, sql, -1, &stmt, nullptr);
         
@@ -137,6 +152,7 @@ public:
         sqlite3_bind_int(stmt, 14, rootfs_gb);
         sqlite3_bind_text(stmt, 15, uuid.c_str(), -1, SQLITE_STATIC);
         sqlite3_bind_text(stmt, 16, name.c_str(), -1, SQLITE_STATIC);
+        sqlite3_bind_int(stmt, 17, owner_id);
 
         sqlite3_step(stmt); sqlite3_finalize(stmt);
     }
@@ -187,8 +203,8 @@ public:
     }
 
     // --- Volumes ---
-    int insert_volume(const std::string& name, int size_gb) {
-        std::string sql = "INSERT INTO volumes (name, size_gb) VALUES ('" + name + "', " + std::to_string(size_gb) + ");";
+    int insert_volume(const std::string& name, int size_gb, int owner_id = 1) {
+        std::string sql = "INSERT INTO volumes (name, size_gb, owner_id) VALUES ('" + name + "', " + std::to_string(size_gb) + ", " + std::to_string(owner_id) + ");";
         execute_query(sql);
         return sqlite3_last_insert_rowid(db);
     }
@@ -205,17 +221,20 @@ public:
         execute_query("UPDATE volumes SET attached_vm_id = -1 WHERE id = " + std::to_string(vol_id) + ";");
     }
 
-    struct VolumeRow { int id; std::string name; int size_gb; int attached_vm_id; };
+    struct VolumeRow { int id; std::string name; int size_gb; int attached_vm_id; int owner_id; };
 
-    std::vector<VolumeRow> get_volumes() {
+    std::vector<VolumeRow> get_volumes(int user_id = 1, bool is_admin = true) {
         std::vector<VolumeRow> vols; sqlite3_stmt* stmt;
-        if (sqlite3_prepare_v2(db, "SELECT id, name, size_gb, attached_vm_id FROM volumes;", -1, &stmt, nullptr) == SQLITE_OK) {
+        if (sqlite3_prepare_v2(db, "SELECT id, name, size_gb, attached_vm_id, owner_id FROM volumes WHERE owner_id = ? OR ? = 1;", -1, &stmt, nullptr) == SQLITE_OK) {
+            sqlite3_bind_int(stmt, 1, user_id);
+            sqlite3_bind_int(stmt, 2, is_admin ? 1 : 0);
             while (sqlite3_step(stmt) == SQLITE_ROW) {
                 vols.push_back({
                     sqlite3_column_int(stmt, 0),
                     reinterpret_cast<const char*>(sqlite3_column_text(stmt, 1)),
                     sqlite3_column_int(stmt, 2),
-                    sqlite3_column_int(stmt, 3)
+                    sqlite3_column_int(stmt, 3),
+                    sqlite3_column_count(stmt) > 4 ? sqlite3_column_int(stmt, 4) : 1
                 });
             }
             sqlite3_finalize(stmt);

@@ -16,8 +16,15 @@ inline void relay_data(int src_fd, int dst_fd) {
     while (true) {
         ssize_t bytes = recv(src_fd, buffer, sizeof(buffer), 0);
         if (bytes <= 0) break; // Connection closed or error
-        send(dst_fd, buffer, bytes, 0);
+        
+        ssize_t total_sent = 0;
+        while (total_sent < bytes) {
+            ssize_t s = send(dst_fd, buffer + total_sent, bytes - total_sent, 0);
+            if (s <= 0) goto end;
+            total_sent += s;
+        }
     }
+end:
     shutdown(src_fd, SHUT_RDWR);
     shutdown(dst_fd, SHUT_RDWR);
     close(src_fd);

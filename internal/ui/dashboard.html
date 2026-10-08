@@ -1,0 +1,154 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>CryoSpawn - Dashboard</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="bg-slate-50 text-slate-900 font-sans antialiased flex h-screen overflow-hidden">
+    <!-- Sidebar -->
+    <aside class="w-64 bg-slate-900 text-white flex flex-col hidden md:flex">
+        <div class="p-6 border-b border-slate-800">
+            <h1 class="text-xl font-bold tracking-tight">CryoSpawn</h1>
+            <p class="text-xs text-slate-400 mt-1" id="user-greeting">Loading...</p>
+        </div>
+        <nav class="flex-1 px-4 py-6 space-y-2">
+            <a href="/dashboard" class="bg-blue-600 text-white shadow-sm flex items-center px-4 py-2.5 rounded-lg transition-colors font-medium text-sm">💻 MicroVMs</a>
+            <a href="/volumes" class="text-slate-400 hover:bg-slate-800 hover:text-white flex items-center px-4 py-2.5 rounded-lg transition-colors font-medium text-sm">💾 Elastic Volumes</a>
+            <a href="/networks" class="text-slate-400 hover:bg-slate-800 hover:text-white flex items-center px-4 py-2.5 rounded-lg transition-colors font-medium text-sm">🌐 Routing & Mesh</a>
+            <a href="/settings" class="text-slate-400 hover:bg-slate-800 hover:text-white flex items-center px-4 py-2.5 rounded-lg transition-colors font-medium text-sm">⚙️ Settings</a>
+        </nav>
+        <div class="p-4 border-t border-slate-800">
+            <button onclick="logout()" class="w-full flex items-center justify-center px-4 py-2 bg-slate-800 hover:bg-red-600 rounded-lg transition-colors text-sm font-medium">Logout</button>
+        </div>
+    </aside>
+
+    <!-- Main Content -->
+    <main class="flex-1 flex flex-col overflow-y-auto">
+        <header class="bg-white border-b border-slate-200 px-8 py-5 flex items-center justify-between md:hidden">
+            <h1 class="text-lg font-bold">CryoSpawn</h1>
+            <button onclick="logout()" class="text-sm font-medium text-red-600">Logout</button>
+        </header>
+        
+        <div class="p-8 max-w-6xl mx-auto w-full">
+            <div class="mb-8">
+                <h2 class="text-2xl font-bold text-slate-800">MicroVM Dashboard</h2>
+                <p class="text-slate-500 text-sm mt-1">Manage your isolated virtual machines.</p>
+            </div>
+            
+            
+<div class="grid grid-cols-1 lg:grid-cols-3 gap-8">
+    <div class="bg-white rounded-xl border border-slate-200 shadow-sm p-6 lg:col-span-1 h-fit">
+        <h3 class="text-base font-semibold text-slate-800 mb-4 pb-3 border-b border-slate-100">Spawn New Instance</h3>
+        <form id="spawn-form">
+            <div class="space-y-4">
+                <div>
+                    <label class="block text-xs font-medium text-slate-600 mb-1">Instance Name</label>
+                    <input type="text" id="vm-name" placeholder="e.g. web-server-1" required class="w-full border border-slate-300 rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
+                </div>
+                <div>
+                    <label class="block text-xs font-medium text-slate-600 mb-1">Project Group</label>
+                    <input type="text" id="project-name" value="default" class="w-full border border-slate-300 rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
+                </div>
+                <div class="grid grid-cols-2 gap-3">
+                    <div>
+                        <label class="block text-xs font-medium text-slate-600 mb-1">vCPUs</label>
+                        <select id="vcpus" class="w-full border border-slate-300 rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
+                            <option value="1">1 Core</option>
+                            <option value="2">2 Cores</option>
+                            <option value="4">4 Cores</option>
+                        </select>
+                    </div>
+                    <div>
+                        <label class="block text-xs font-medium text-slate-600 mb-1">Memory (RAM)</label>
+                        <select id="ram" class="w-full border border-slate-300 rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
+                            <option value="256">256 MB</option>
+                            <option value="512" selected>512 MB</option>
+                            <option value="1024">1 GB</option>
+                            <option value="2048">2 GB</option>
+                        </select>
+                    </div>
+                </div>
+                <div>
+                    <label class="block text-xs font-medium text-slate-600 mb-1 flex justify-between">
+                        <span>Root Disk Size</span>
+                        <span id="rootfs_display" class="text-blue-600 font-bold">3 GB</span>
+                    </label>
+                    <input type="range" id="rootfs_gb" min="1" max="20" value="3" class="w-full accent-blue-600">
+                </div>
+                <div class="pt-2 pb-2 space-y-3">
+                    <label class="flex items-center cursor-pointer">
+                        <input type="checkbox" id="expose-ssh" class="sr-only peer">
+                        <div class="w-9 h-5 bg-slate-200 peer-focus:outline-none peer-focus:ring-2 peer-focus:ring-blue-500 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-blue-600 relative"></div>
+                        <span class="ml-3 text-sm font-medium text-slate-700">Enable SSH (Port 22)</span>
+                    </label>
+                    <label class="flex items-center cursor-pointer">
+                        <input type="checkbox" id="expose-http" class="sr-only peer">
+                        <div class="w-9 h-5 bg-slate-200 peer-focus:outline-none peer-focus:ring-2 peer-focus:ring-green-500 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-green-600 relative"></div>
+                        <span class="ml-3 text-sm font-medium text-slate-700">Enable HTTP (Port 80)</span>
+                    </label>
+                    <label class="flex items-center cursor-pointer">
+                        <input type="checkbox" id="expose-https" class="sr-only peer">
+                        <div class="w-9 h-5 bg-slate-200 peer-focus:outline-none peer-focus:ring-2 peer-focus:ring-green-500 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-green-600 relative"></div>
+                        <span class="ml-3 text-sm font-medium text-slate-700">Enable HTTPS (Port 443)</span>
+                    </label>
+                </div>
+                <button type="submit" id="spawn-btn" class="w-full bg-blue-600 text-white font-medium py-2 px-4 rounded-md hover:bg-blue-700 transition-colors">
+                    Deploy MicroVM
+                </button>
+            </div>
+        </form>
+    </div>
+
+    <div class="lg:col-span-2">
+        <div class="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
+            <div class="px-6 py-4 border-b border-slate-200 bg-slate-50 flex justify-between items-center">
+                <h2 class="text-base font-semibold text-slate-800">Active Instances</h2>
+                <span id="vm-count-badge" class="text-xs font-medium px-2 py-1 bg-slate-200 text-slate-700 rounded-full">0 VMs</span>
+            </div>
+            <div class="overflow-x-auto">
+                <table class="w-full text-sm text-left">
+                    <thead class="text-xs text-slate-500 uppercase bg-slate-50 border-b border-slate-200">
+                        <tr>
+                            <th class="px-6 py-3">VM / Project</th>
+                            <th class="px-6 py-3">Status</th>
+                            <th class="px-6 py-3">IP Addresses (/30)</th>
+                            <th class="px-6 py-3">Specs & Ports</th>
+                            <th class="px-6 py-3 text-right">Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody id="vm-table-body" class="divide-y divide-slate-100"></tbody>
+                </table>
+            </div>
+            <div id="empty-state" class="hidden text-center py-10">
+                <p class="text-sm text-slate-500">No microVMs running.</p>
+            </div>
+        </div>
+    </div>
+</div>
+
+        </div>
+    </main>
+
+    <script>
+        async function fetchUser() {
+            try {
+                const res = await fetch('/api/auth/me');
+                if (!res.ok) { window.location.href = '/login'; return; }
+                const data = await res.json();
+                document.getElementById('user-greeting').innerText = `Welcome, ${data.username}`;
+            } catch (e) {
+                window.location.href = '/login';
+            }
+        }
+        fetchUser();
+
+        async function logout() {
+            await fetch('/api/auth/logout', {method:'POST'});
+            window.location.href = '/login';
+        }
+    </script>
+    <script src="app.js"></script>
+</body>
+</html>

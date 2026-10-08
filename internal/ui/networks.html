@@ -1,0 +1,95 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>CryoSpawn - Networks</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="bg-slate-50 text-slate-900 font-sans antialiased flex h-screen overflow-hidden">
+    <!-- Sidebar -->
+    <aside class="w-64 bg-slate-900 text-white flex flex-col hidden md:flex">
+        <div class="p-6 border-b border-slate-800">
+            <h1 class="text-xl font-bold tracking-tight">CryoSpawn</h1>
+            <p class="text-xs text-slate-400 mt-1" id="user-greeting">Loading...</p>
+        </div>
+        <nav class="flex-1 px-4 py-6 space-y-2">
+            <a href="/dashboard" class="text-slate-400 hover:bg-slate-800 hover:text-white flex items-center px-4 py-2.5 rounded-lg transition-colors font-medium text-sm">💻 MicroVMs</a>
+            <a href="/volumes" class="text-slate-400 hover:bg-slate-800 hover:text-white flex items-center px-4 py-2.5 rounded-lg transition-colors font-medium text-sm">💾 Elastic Volumes</a>
+            <a href="/networks" class="bg-blue-600 text-white shadow-sm flex items-center px-4 py-2.5 rounded-lg transition-colors font-medium text-sm">🌐 Routing & Mesh</a>
+            <a href="/settings" class="text-slate-400 hover:bg-slate-800 hover:text-white flex items-center px-4 py-2.5 rounded-lg transition-colors font-medium text-sm">⚙️ Settings</a>
+        </nav>
+        <div class="p-4 border-t border-slate-800">
+            <button onclick="logout()" class="w-full flex items-center justify-center px-4 py-2 bg-slate-800 hover:bg-red-600 rounded-lg transition-colors text-sm font-medium">Logout</button>
+        </div>
+    </aside>
+
+    <!-- Main Content -->
+    <main class="flex-1 flex flex-col overflow-y-auto">
+        <header class="bg-white border-b border-slate-200 px-8 py-5 flex items-center justify-between md:hidden">
+            <h1 class="text-lg font-bold">CryoSpawn</h1>
+            <button onclick="logout()" class="text-sm font-medium text-red-600">Logout</button>
+        </header>
+        
+        <div class="p-8 max-w-6xl mx-auto w-full">
+            <div class="mb-8">
+                <h2 class="text-2xl font-bold text-slate-800">Network Topology</h2>
+                <p class="text-slate-500 text-sm mt-1">Configure microsegmentation and routing.</p>
+            </div>
+            
+            
+<div class="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
+    <div class="px-6 py-4 border-b border-slate-200 bg-slate-50">
+        <h2 class="text-lg font-semibold text-slate-800">Software-Defined Routing Table</h2>
+        <p class="text-xs text-slate-500 mt-0.5">Explicitly route traffic between VMs in the same project</p>
+    </div>
+    <div class="p-6">
+        <form id="link-form" class="flex flex-wrap items-center gap-3 pb-6 border-b border-slate-100">
+            <div class="flex-1 min-w-[140px]">
+                <label class="block text-xs font-medium text-slate-600 mb-1">Source VM</label>
+                <select id="link-vm1" required class="w-full border border-slate-300 rounded-md px-3 py-2 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-blue-500"></select>
+            </div>
+            <div class="pt-5 text-slate-400 font-bold">⟷</div>
+            <div class="flex-1 min-w-[140px]">
+                <label class="block text-xs font-medium text-slate-600 mb-1">Destination VM</label>
+                <select id="link-vm2" required class="w-full border border-slate-300 rounded-md px-3 py-2 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-blue-500"></select>
+            </div>
+            <div class="pt-5">
+                <button type="submit" id="link-btn" class="bg-blue-600 hover:bg-blue-700 text-white font-medium px-4 py-2 rounded-md text-sm transition-colors">
+                    Bridge Link
+                </button>
+            </div>
+        </form>
+        <div class="mt-4">
+            <h3 class="text-xs font-semibold uppercase tracking-wider text-slate-400 mb-3">Active Interconnects</h3>
+            <div id="links-container" class="space-y-2">
+                <p class="text-xs text-slate-400 italic">No custom routes active. VMs are currently isolated.</p>
+            </div>
+        </div>
+    </div>
+</div>
+
+        </div>
+    </main>
+
+    <script>
+        async function fetchUser() {
+            try {
+                const res = await fetch('/api/auth/me');
+                if (!res.ok) { window.location.href = '/login'; return; }
+                const data = await res.json();
+                document.getElementById('user-greeting').innerText = `Welcome, ${data.username}`;
+            } catch (e) {
+                window.location.href = '/login';
+            }
+        }
+        fetchUser();
+
+        async function logout() {
+            await fetch('/api/auth/logout', {method:'POST'});
+            window.location.href = '/login';
+        }
+    </script>
+    <script src="app.js"></script>
+</body>
+</html>
