@@ -1,8 +1,13 @@
-# CryoSpawn DNS & Ingress Architecture
+# 🌍 CryoSpawn DNS & Ingress Architecture
+
+> **Written for:** operators who want to publish the dashboard and VM web services on a real domain through Cloudflare Tunnels and Nginx.
+
+> [!NOTE]
+> This is the target architecture. What exists today: the Flask frontend on port 8080 with login, and the per-VM Unix sockets `/tmp/cryo-<hex>_80.sock`. The `admin.` host, the `/console/[uuid]` web terminal and the Nginx and Cloudflare configs below are not part of the repository yet.
 
 This document outlines the production ingress architecture for CryoSpawn. By leveraging Cloudflare Zero Trust Tunnels and a local Nginx reverse proxy, CryoSpawn can host an infinite number of microVMs on a single physical host without exposing any open ports to the public internet.
 
-## 1. Architecture Overview
+## 🧭 1. Architecture Overview
 
 ```text
 [ Internet ] 
@@ -23,7 +28,7 @@ This document outlines the production ingress architecture for CryoSpawn. By lev
     |--- If `[uuid].yourdomain.com`--> Pipes directly into Unix Socket (`/tmp/cryo-[uuid]_80.sock`)
 ```
 
-## 2. URL Schema & Routing Map
+## 🗺️ 2. URL Schema & Routing Map
 
 The system is strictly designed to use **one level of subdomains** to remain compatible with Cloudflare's Free Universal SSL. 
 
@@ -36,7 +41,7 @@ The system is strictly designed to use **one level of subdomains** to remain com
 | `admin.yourdomain.com` | Super Admin Global Dashboard | Yes (Admin) | Flask (8080) |
 | `[uuid].yourdomain.com` | User's hosted microVM services | No | Nginx -> Unix Socket |
 
-## 3. Cloudflare Configuration (Free Tier)
+## ☁️ 3. Cloudflare Configuration (Free Tier)
 
 CryoSpawn utilizes **Wildcard Tunnels** to dynamically route user VMs without requiring API calls to Cloudflare for every new VM.
 
@@ -44,7 +49,7 @@ CryoSpawn utilizes **Wildcard Tunnels** to dynamically route user VMs without re
 2. **The DNS Record:** A manual `CNAME` record with the name `*` must be pointed to the Cloudflare Tunnel ID (e.g., `1234abcd-1234.cfargotunnel.com`).
 3. **SSL Limitations:** Cloudflare Free SSL covers the apex (`domain.com`) and one subdomain level (`*.domain.com`). We avoid deep subdomains (like `[uuid].vms.domain.com`) to prevent SSL certificate warnings.
 
-## 4. The Nginx Traffic Cop
+## 🚦 4. The Nginx Traffic Cop
 
 Because Cloudflare dumps *all* traffic onto localhost port 80, Nginx is responsible for routing. Nginx reads the `Host` header and applies the following logic:
 
@@ -75,18 +80,18 @@ server {
 }
 ```
 
-## 5. Security Posture
+## 🔒 5. Security Posture
 * **Zero Public Ports:** The host machine requires no port forwarding.
-* **Namespace Isolation:** System dashboards (`app.`) and user VMs (`[uuid].`) are strictly separated by subdomain names. A user cannot hijack `app.yourdomain.com` because UUIDs are strictly enforced as 8-character hex strings by the C++ engine.
+* **Namespace Isolation:** System dashboards (`app.`) and user VMs (`[uuid].`) are strictly separated by subdomain names. A user cannot hijack `app.yourdomain.com` because the C++ engine generates the VM IDs as 8-character hex strings (`vm-` plus hex).
 * **WebSocket Authentication:** Terminal access via `app.yourdomain.com/console/[uuid]` is verified by Python session cookies before establishing the PTY stream to the VM.
 
-## 6. Integration with CryoSpawn Engineering Roadmap
+## 🛣️ 6. Integration with CryoSpawn Engineering Roadmap
 
 This Cloudflare/Nginx Ingress architecture perfectly sets the stage for the final phases of the `ROADMAP.md`:
 
-### Phase 7: Multi-Tenant RBAC
+### Phase 7: Multi-Tenant RBAC (partly done)
 * **Ingress Mapping:** `app.yourdomain.com/login` and `/dashboard`.
-* **Execution:** Python will issue secure Session Cookies. Nginx blindly forwards traffic to Python, and Python uses the SQLite `users` table to enforce tenant isolation (User A only sees User A's VMs).
+* **Execution:** Python issues session cookies and keeps the SQLite `users` table. Nginx blindly forwards traffic to Python, and the daemon filters VMs by the `X-User-ID` and `X-Role` headers Python adds. Login, sessions and the header hand-off exist; ownership is not yet recorded on new VMs (see [KNOWN-ISSUES.md](KNOWN-ISSUES.md)).
 
 ### Phase 8: Topology Hub & Branching
 * **Ingress Mapping:** `app.yourdomain.com/topology`.

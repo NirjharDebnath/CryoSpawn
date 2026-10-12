@@ -6,19 +6,19 @@ CS.REPO = "https://github.com/NirjharDebnath/CryoSpawn/blob/main/";
 
 /* Nodes on the live map (centre x/y in a 1200 x 760 viewBox). c = accent colour token. */
 CS.NODES = {
-  browser: { x: 95,  y: 100, label: "Browser",       sub: "http://vm0.cryo",  icon: "bi-globe2",          c: "--ice"  },
+  browser: { x: 95,  y: 100, label: "Browser",       sub: "cryo-<hex>.cryo",  icon: "bi-globe2",          c: "--ice"  },
   ssh:     { x: 95,  y: 230, label: "SSH client",    sub: "nc -U socket",     icon: "bi-terminal",        c: "--ice"  },
-  dash:    { x: 95,  y: 360, label: "Dashboard",     sub: "UI · curl",        icon: "bi-window-sidebar",  c: "--ice"  },
+  dash:    { x: 95,  y: 360, label: "Dashboard",     sub: "Flask :8080 · curl",        icon: "bi-window-sidebar",  c: "--ice"  },
   nginx:   { x: 310, y: 100, label: "Nginx",         sub: "*.cryo :80/:443",  icon: "bi-signpost-split",  c: "--ice", lamp: true },
   uds:     { x: 500, y: 100, label: "Unix sockets",  sub: "/tmp/*.sock",      icon: "bi-plug",            c: "--ice", lamp: true },
   ghost:   { x: 690, y: 100, label: "Ghost Proxy",   sub: "proxy.hpp",        icon: "bi-shuffle",         c: "--wake", lamp: true },
-  api:     { x: 310, y: 300, label: "REST API",      sub: ":8080 · main.cpp", icon: "bi-braces",          c: "--ice", lamp: true },
+  api:     { x: 310, y: 300, label: "REST API",      sub: ":9090 · main.cpp", icon: "bi-braces",          c: "--ice", lamp: true },
   mgr:     { x: 520, y: 300, w: 150, label: "VMManager", sub: "orchestrator.hpp", icon: "bi-cpu",         c: "--ice" },
   db:      { x: 310, y: 450, label: "SQLite",        sub: "cryospawn.db",     icon: "bi-database",        c: "--disk" },
   reaper:  { x: 510, y: 450, w: 165, label: "Reaper thread", sub: "waitpid() · 2 s", icon: "bi-recycle",  c: "--wake", lamp: true },
   nf:      { x: 700, y: 580, label: "Netfilter",     sub: "iptables · NAT",   icon: "bi-shield-lock",     c: "--net", lamp: true },
-  tap0:    { x: 838, y: 240, w: 140, label: "cryo0", sub: "172.16.0.1/30",    icon: "bi-ethernet",        c: "--net"  },
-  tap1:    { x: 838, y: 430, w: 140, label: "cryo1", sub: "172.16.0.5/30",    icon: "bi-ethernet",        c: "--net"  },
+  tap0:    { x: 838, y: 240, w: 140, label: "cryo-<hex>", sub: "172.16.0.1/30",    icon: "bi-ethernet",        c: "--net"  },
+  tap1:    { x: 838, y: 430, w: 140, label: "cryo-<hex>", sub: "172.16.0.5/30",    icon: "bi-ethernet",        c: "--net"  },
   vm0:     { x: 1000, y: 240, w: 150, h: 120, vm: 0, label: "VM 0", icon: "bi-pc-display", c: "--run" },
   vm1:     { x: 1000, y: 430, w: 150, h: 120, vm: 1, label: "VM 1", icon: "bi-pc-display", c: "--run" },
   tpl:     { x: 360, y: 700, label: "Golden images", sub: "rootfs · kernel", icon: "bi-box-seam",     c: "--disk" },
@@ -41,7 +41,7 @@ CS.EDGES = {
   "e-gh-tap1":  { from: "ghost", to: "tap1",    d: "M720,130 C720,330 730,415 768,415" },
   "e-gh-mgr":   { from: "ghost", to: "mgr",     d: "M630,130 C630,210 560,220 560,270", label: "wake_fn", lx: 675, ly: 222 },
   "e-api-gh":   { from: "api", to: "ghost",     d: "M350,270 C350,170 650,170 660,130", label: "spawn listener", lx: 500, ly: 160 },
-  "e-dash-api": { from: "dash", to: "api",      d: "M170,360 C205,360 200,300 235,300", label: "REST", lx: 188, ly: 322 },
+  "e-dash-api": { from: "dash", to: "api",      d: "M170,360 C205,360 200,300 235,300", label: "via Flask", lx: 188, ly: 322 },
   "e-api-mgr":  { from: "api", to: "mgr",       d: "M385,300 L445,300" },
   "e-mgr-db":   { from: "mgr", to: "db",        d: "M470,328 L360,425" },
   "e-mgr-reaper": { from: "mgr", to: "reaper",  d: "M520,328 L520,425" },
@@ -117,46 +117,46 @@ CS.SCENARIOS = [
     setup: { ready: { api: false, nf: false, reaper: false }, vm: { 0: "running", 1: "dead" }, tap: { 0: true, 1: true }, disk: { 0: true, 1: true } },
     steps: [
       { t: "VMManager() starts and finds the default network interface with ip route show default.", ref: "network.hpp · get_default_interface()", f: ["mgr"] },
-      { t: "Firewall baseline: ip_forward=1, MASQUERADE out of that interface, allow RELATED/ESTABLISHED, allow DNAT hairpin, and DROP every other cryo+ → cryo+ packet.", ref: "network.hpp · init_cryo_firewall_baseline()", p: ["e-mgr-nf"], s: { ready: { nf: true } } },
+      { t: "Firewall baseline: ip_forward=1, MASQUERADE out of that interface, allow RELATED/ESTABLISHED, allow DNAT hairpin, DROP every other cryo+ → cryo+ packet, REJECT VM traffic to 192.168.0.0/16 and 10.0.0.0/8, and REJECT INPUT from cryo+ so a VM cannot reach the host.", ref: "network.hpp · init_cryo_firewall_baseline()", p: ["e-mgr-nf"], s: { ready: { nf: true } } },
       { t: "Create the instances/ and volumes/ directories if they are missing.", ref: "orchestrator.hpp · VMManager()", p: ["e-mgr-vols"], f: ["inst", "vols"] },
       { t: "reconcile_state() reads every row of the vms table.", ref: "orchestrator.hpp · reconcile_state()", p: ["-e-mgr-db"] },
       { t: "VM 0: kill(pid, 0) succeeds, so the still-running Firecracker process is adopted back into memory.", ref: "orchestrator.hpp · reconcile_state()", p: ["e-mgr-vm0"], f: ["vm0"] },
       { t: "VM 1: its PID is gone, so the stale entry is cleaned up: TAP removed, disk and snapshot files deleted, socket files unlinked, DB row deleted.", ref: "orchestrator.hpp · cleanup_vm_resources()", p: [["e-mgr-nf", "e-nf-tap1"], "e-mgr-vm1", "e-mgr-db"], s: { vm: { 1: "absent" }, tap: { 1: false }, disk: { 1: false } } },
       { t: "start_reaper() launches a background thread that polls waitpid() every 2 seconds.", ref: "orchestrator.hpp · start_reaper()", p: ["e-mgr-reaper"], s: { ready: { reaper: true } } },
       { t: "main() starts a Ghost Proxy thread for each exposed port of every adopted VM.", ref: "main.cpp · main()", p: ["e-api-gh"], s: { sock: { 0: true } } },
-      { t: "The HTTP server binds 0.0.0.0:8080 and serves the REST API and the dashboard files.", ref: "main.cpp · svr.listen()", f: ["api"], s: { ready: { api: true } } }
+      { t: "The HTTP server binds 127.0.0.1:9090 and serves the REST API only. The Flask frontend (python frontend/app.py) is a separate process that serves the dashboard on :8080.", ref: "main.cpp · svr.listen()", f: ["api"], s: { ready: { api: true } } }
     ]
   },
   {
     id: "create", group: "Lifecycle", title: "Create a MicroVM", icon: "bi-plus-circle", c: "--run",
     trigger: "POST /api/vms",
-    summary: "The request handler prepares the slot, network and process, replies right away, and a background thread then configures Firecracker and boots the guest.",
+    summary: "Flask checks the login session and forwards the request. The request handler prepares the slot, network and process, replies right away, and a background thread then configures Firecracker and boots the guest.",
     setup: {},
     steps: [
-      { t: "The dashboard sends POST /api/vms with vcpus, mem_mib, expose_ssh/http/https, project and rootfs_gb (default 3).", ref: "main.cpp · POST /api/vms", p: ["e-dash-api"] },
+      { t: "The dashboard sends POST /api/vms with name, vcpus, mem_mib, expose_ssh/http/https, project and rootfs_gb (default 3). Flask checks the session and forwards it to :9090 with X-User-ID and X-Role headers.", ref: "main.cpp · POST /api/vms", p: ["e-dash-api"] },
       { t: "create_vm() takes the lock and asks SQLite for the next free slot: slot 0.", ref: "database.hpp · get_next_free_slot()", p: [["e-api-mgr", "e-mgr-db", "-e-mgr-db"]] },
-      { t: "Slot math: base = slot × 4 → host 172.16.0.1, guest 172.16.0.2, TAP cryo0, MAC AA:FC:AC:10:00:00, API socket /tmp/cryo_0.socket.", ref: "orchestrator.hpp · create_vm()", f: ["mgr"] },
-      { t: "setup_cryo_network(): ip tuntap add cryo0, ip addr add 172.16.0.1/30, link up, FORWARD cryo0 → internet ACCEPT.", ref: "network.hpp · setup_cryo_network()", p: [["e-mgr-nf", "e-nf-tap0"]], s: { tap: { 0: true } } },
-      { t: "fork() + execlp firecracker --api-sock /tmp/cryo_0.socket. The child calls setsid() and sends stdio to /dev/null.", ref: "orchestrator.hpp · create_vm()", p: ["e-mgr-vm0"], s: { vm: { 0: "booting" } } },
-      { t: "db.insert_vm() records slot 0 with status booting.", ref: "database.hpp · insert_vm()", p: ["e-mgr-db"] },
-      { t: "The handler starts one Ghost Proxy thread per exposed port and replies {id, ip, status: booting}.", ref: "main.cpp · POST /api/vms", p: ["e-api-gh", "-e-dash-api"], s: { sock: { 0: true } } },
+      { t: "Slot math: base = slot × 4 → host 172.16.0.1, guest 172.16.0.2, MAC AA:FC:AC:10:00:00. A random UUID (say vm-da05a06c) names everything else: TAP cryo-da05a06c, API socket /tmp/cryo-da05a06c.socket.", ref: "orchestrator.hpp · create_vm()", f: ["mgr"] },
+      { t: "setup_cryo_network(): ip tuntap add cryo-da05a06c, ip addr add 172.16.0.1/30, link up, FORWARD TAP → internet ACCEPT.", ref: "network.hpp · setup_cryo_network()", p: [["e-mgr-nf", "e-nf-tap0"]], s: { tap: { 0: true } } },
+      { t: "fork() + execlp firecracker --api-sock /tmp/cryo-da05a06c.socket. The child calls setsid() and sends stdio to /dev/null.", ref: "orchestrator.hpp · create_vm()", p: ["e-mgr-vm0"], s: { vm: { 0: "booting" } } },
+      { t: "db.insert_vm() records slot 0 with its UUID, name and status booting.", ref: "database.hpp · insert_vm()", p: ["e-mgr-db"] },
+      { t: "The handler starts one Ghost Proxy thread per exposed port and replies {id, uuid, name, ip, status: booting}.", ref: "main.cpp · POST /api/vms", p: ["e-api-gh", "-e-dash-api"], s: { sock: { 0: true } } },
       { t: "configure_and_start() runs on a detached thread: it waits for the API socket, then PUT /boot-source with the kernel and ip= boot args.", ref: "orchestrator.hpp · configure_and_start()", p: ["e-mgr-vm0"] },
-      { t: "First boot only: copy the golden rootfs to instances/vm_0_rootfs.ext4. If rootfs_gb ≥ 3: truncate, e2fsck, resize2fs.", ref: "orchestrator.hpp · configure_and_start()", p: ["e-tpl-inst"], s: { disk: { 0: true } } },
+      { t: "First boot only: copy the golden rootfs to instances/cryo-da05a06c_rootfs.ext4. If rootfs_gb ≥ 3: truncate, e2fsck, resize2fs.", ref: "orchestrator.hpp · configure_and_start()", p: ["e-tpl-inst"], s: { disk: { 0: true } } },
       { t: "PUT /drives/rootfs points at the instance disk. PUT /drives/vol_N runs for every volume attached to this slot.", ref: "orchestrator.hpp · configure_and_start()", p: ["-e-vm0-inst"] },
-      { t: "PUT /network-interfaces/eth0 binds the guest NIC (with its MAC) to TAP cryo0.", ref: "orchestrator.hpp · configure_and_start()", p: ["e-tap0-vm0"] },
+      { t: "PUT /network-interfaces/eth0 binds the guest NIC (with its MAC) to the VM's TAP.", ref: "orchestrator.hpp · configure_and_start()", p: ["e-tap0-vm0"] },
       { t: "PUT /machine-config (vCPUs, RAM), then PUT /actions InstanceStart. Status becomes running in memory and SQLite.", ref: "orchestrator.hpp · configure_and_start()", p: ["e-mgr-vm0", "e-mgr-db"], s: { vm: { 0: "running" } } }
     ]
   },
   {
     id: "hibernate", group: "Lifecycle", title: "Hibernate (freeze to disk)", icon: "bi-snow", c: "--sleep",
-    trigger: "POST /api/vms/0/hibernate",
+    trigger: "POST /api/vms/vm-da05a06c/hibernate",
     summary: "The VM is paused, its CPU state and RAM are written to two files, and the Firecracker process is killed. Network, disk and sockets stay in place.",
     setup: RUN0,
     steps: [
-      { t: "The dashboard sends POST /api/vms/0/hibernate.", ref: "main.cpp · POST /api/vms/:id/hibernate", p: ["e-dash-api"] },
-      { t: "hibernate_vm(0) takes the lock. Only a VM whose status is running can be frozen.", ref: "orchestrator.hpp · hibernate_vm()", p: ["e-api-mgr"] },
+      { t: "The dashboard sends POST /api/vms/vm-da05a06c/hibernate. The handler maps the UUID to slot 0 and checks ownership.", ref: "main.cpp · POST /api/vms/:id/hibernate", p: ["e-dash-api"] },
+      { t: "hibernate_vm(slot 0) takes the lock. Only a VM whose status is running can be frozen.", ref: "orchestrator.hpp · hibernate_vm()", p: ["e-api-mgr"] },
       { t: "PATCH /vm {state: Paused}: the guest's vCPUs stop.", ref: "orchestrator.hpp · hibernate_vm()", p: ["e-mgr-vm0"], s: { vm: { 0: "paused" } } },
-      { t: "PUT /snapshot/create (Full): CPU and device state go to vm_0_state.snap, guest RAM to vm_0_mem.ram.", ref: "orchestrator.hpp · hibernate_vm()", p: ["e-vm0-inst"], s: { snap: { 0: true } } },
+      { t: "PUT /snapshot/create (Full): CPU and device state go to cryo-da05a06c_state.snap, guest RAM to cryo-da05a06c_mem.ram.", ref: "orchestrator.hpp · hibernate_vm()", p: ["e-vm0-inst"], s: { snap: { 0: true } } },
       { t: "Status is set to hibernated in memory and SQLite before the kill, so the Reaper keeps the files.", ref: "orchestrator.hpp · hibernate_vm()", p: ["e-mgr-db"] },
       { t: "kill(pid, SIGKILL): the Firecracker process is gone, so the VM uses no host CPU or RAM.", ref: "orchestrator.hpp · hibernate_vm()", p: ["e-mgr-vm0"], s: { vm: { 0: "hibernated" } } },
       { t: "Reaper: waitpid() reports the exit. Status is hibernated, so it only clears the PID. TAP, disk, snapshot and sockets stay.", ref: "orchestrator.hpp · start_reaper()", p: ["e-mgr-reaper"] },
@@ -165,15 +165,15 @@ CS.SCENARIOS = [
   },
   {
     id: "wake", group: "Lifecycle", title: "Auto-wake on HTTP traffic", icon: "bi-lightning-charge", c: "--wake",
-    trigger: "GET http://vm0.cryo",
+    trigger: "GET http://cryo-da05a06c.cryo",
     summary: "A request to a sleeping VM is caught by its Ghost Proxy, which restores the VM from the snapshot and then forwards the request.",
     setup: Object.assign({}, RUN0, { vm: { 0: "hibernated" }, snap: { 0: true } }),
     steps: [
-      { t: "The browser resolves vm0.cryo to 127.0.0.1 (/etc/hosts) and sends GET to Nginx on port 80.", ref: "DESIGN.md · Nginx ingress", p: ["e-br-ng"] },
-      { t: "server_name ~^vm(?<vmid>\\d+)\\.cryo$ captures 0 and proxy_pass sends it to unix:/tmp/cryo_vm_0_80.sock.", ref: "nginx/server.sh", p: ["e-ng-uds"] },
+      { t: "The browser resolves cryo-da05a06c.cryo to 127.0.0.1 (/etc/hosts) and sends GET to Nginx on port 80.", ref: "DESIGN.md · Nginx ingress", p: ["e-br-ng"] },
+      { t: "server_name ~^cryo-(?<hex>[a-f0-9]+)\\.cryo$ captures da05a06c and proxy_pass sends it to unix:/tmp/cryo-da05a06c_80.sock.", ref: "nginx/server.sh", p: ["e-ng-uds"] },
       { t: "The Ghost Proxy accept()s the connection and starts a handle_proxy_client thread.", ref: "proxy.hpp · run_ghost_proxy()", p: ["e-uds-gh"] },
-      { t: "status_fn(0) reports hibernated, so wake_fn(0) calls wake_vm(0).", ref: "proxy.hpp · handle_proxy_client()", p: ["e-gh-mgr"] },
-      { t: "wake_vm marks the VM waking (blocking concurrent wakes) and forks a fresh Firecracker on /tmp/cryo_0.socket.", ref: "orchestrator.hpp · wake_vm()", p: ["e-mgr-db", "e-mgr-vm0"], s: { vm: { 0: "waking" } } },
+      { t: "status_fn reports hibernated, so wake_fn calls wake_vm(slot 0).", ref: "proxy.hpp · handle_proxy_client()", p: ["e-gh-mgr"] },
+      { t: "wake_vm marks the VM waking (blocking concurrent wakes) and forks a fresh Firecracker on /tmp/cryo-da05a06c.socket.", ref: "orchestrator.hpp · wake_vm()", p: ["e-mgr-db", "e-mgr-vm0"], s: { vm: { 0: "waking" } } },
       { t: "PUT /snapshot/load restores CPU state and memory from the snapshot files.", ref: "orchestrator.hpp · wake_vm()", p: ["-e-vm0-inst"] },
       { t: "PATCH /vm {state: Resumed}. Status becomes running.", ref: "orchestrator.hpp · wake_vm()", p: ["e-mgr-vm0", "e-mgr-db"], s: { vm: { 0: "running" } } },
       { t: "The Ghost Proxy waits 600 ms, then connect()s to 172.16.0.2:80, retrying every 200 ms up to 50 times.", ref: "proxy.hpp · handle_proxy_client()", p: [["e-gh-tap0", "e-tap0-vm0"]] },
@@ -181,35 +181,34 @@ CS.SCENARIOS = [
     ]
   },
   {
-    id: "restart", group: "Lifecycle", title: "Restart endpoint", icon: "bi-arrow-repeat", c: "--wake",
-    trigger: "POST /api/vms/0/restart",
-    summary: "reboot_vm() replaces the Firecracker process but keeps the TAP and disk. The handler then also creates a second VM.",
-    note: "As written, this handler also calls create_vm(1, 512, …), so a new VM appears in the next free slot. See Known Issues #2.",
+    id: "restart", group: "Lifecycle", title: "Restart a VM", icon: "bi-arrow-repeat", c: "--wake",
+    trigger: "POST /api/vms/vm-da05a06c/restart",
+    summary: "reboot_vm() replaces the Firecracker process but keeps the TAP, the disk and the UUID.",
+    note: "Attaching or detaching a volume on a running VM goes through the same reboot_vm() path.",
     setup: RUN0,
     steps: [
-      { t: "The dashboard sends POST /api/vms/0/restart.", ref: "main.cpp · POST /api/vms/:id/restart", p: ["e-dash-api"] },
+      { t: "The dashboard sends POST /api/vms/vm-da05a06c/restart. The handler maps the UUID to slot 0 and checks ownership.", ref: "main.cpp · POST /api/vms/:uuid/restart", p: ["e-dash-api"] },
       { t: "reboot_vm(0): status restarting (tells the Reaper to keep resources), then SIGKILL.", ref: "orchestrator.hpp · reboot_vm()", p: [["e-api-mgr", "e-mgr-vm0"]], s: { vm: { 0: "restarting" } } },
       { t: "Reaper sees status restarting: keeps TAP and disk, only clears the PID.", ref: "orchestrator.hpp · start_reaper()", p: ["e-mgr-reaper"] },
       { t: "Unlink the old API socket and fork a new Firecracker on it. Status booting.", ref: "orchestrator.hpp · reboot_vm()", p: ["e-mgr-vm0", "e-mgr-db"], s: { vm: { 0: "booting" } } },
       { t: "configure_and_start(): the instance disk already exists, so there is no copy. Drives, NIC, machine config, InstanceStart → running.", ref: "orchestrator.hpp · configure_and_start()", p: ["-e-vm0-inst", "e-tap0-vm0"], s: { vm: { 0: "running" } } },
-      { t: "The handler then calls create_vm(1, 512, no ports, \"default\", 1): slot 1 is allocated and booted.", ref: "main.cpp · POST /api/vms/:id/restart", p: [["e-mgr-nf", "e-nf-tap1"], "e-mgr-vm1"], s: { vm: { 1: "booting" }, tap: { 1: true } } },
-      { t: "configure_and_start() for slot 1 copies the golden rootfs and boots it.", ref: "orchestrator.hpp · configure_and_start()", p: [["e-tpl-inst", "-e-vm1-inst"]], s: { vm: { 1: "running" }, disk: { 1: true } } }
+      { t: "The API replies {status: restarting}.", ref: "main.cpp", p: ["-e-dash-api"] }
     ]
   },
   {
     id: "destroy", group: "Lifecycle", title: "Destroy a VM", icon: "bi-trash3", c: "--deny",
-    trigger: "DELETE /api/vms/0",
+    trigger: "DELETE /api/vms/vm-da05a06c",
     summary: "The process is killed and the Reaper removes everything the VM owned: links, TAP, files, sockets and its database row.",
     note: "A hibernated VM has no process to kill, so terminate_vm() calls cleanup_vm_resources() directly.",
     setup: Object.assign({}, RUN01, { link: true, snap: { 0: true } }),
     steps: [
-      { t: "The dashboard sends DELETE /api/vms/0.", ref: "main.cpp · DELETE /api/vms/:id", p: ["e-dash-api"] },
-      { t: "terminate_vm(0): the Firecracker PID is alive, so it gets SIGKILL.", ref: "orchestrator.hpp · terminate_vm()", p: [["e-api-mgr", "e-mgr-vm0"]], s: { vm: { 0: "dead" } } },
+      { t: "The dashboard sends DELETE /api/vms/vm-da05a06c.", ref: "main.cpp · DELETE /api/vms/:id", p: ["e-dash-api"] },
+      { t: "terminate_vm(slot 0): the Firecracker PID is alive, so it gets SIGKILL.", ref: "orchestrator.hpp · terminate_vm()", p: [["e-api-mgr", "e-mgr-vm0"]], s: { vm: { 0: "dead" } } },
       { t: "Reaper: waitpid() sees the exit. Status is not hibernated or restarting, so it runs cleanup_vm_resources().", ref: "orchestrator.hpp · start_reaper()", p: ["e-mgr-reaper"] },
-      { t: "For each link: unlink_taps(cryo0, cryo1) deletes the FORWARD and MASQUERADE rules.", ref: "network.hpp · unlink_taps()", p: ["e-mgr-nf"], s: { link: false } },
-      { t: "teardown_cryo_network(): ip link set cryo0 down, ip tuntap del cryo0.", ref: "network.hpp · teardown_cryo_network()", p: [["e-mgr-nf", "e-nf-tap0"]], s: { tap: { 0: false } } },
-      { t: "Delete /tmp/cryo_0.socket, vm_0_rootfs.ext4, vm_0_state.snap and vm_0_mem.ram.", ref: "orchestrator.hpp · cleanup_vm_resources()", p: ["e-vm0-inst"], s: { disk: { 0: false }, snap: { 0: false } } },
-      { t: "Unlink /tmp/cryo_vm_0_22.sock, _80.sock and _443.sock.", ref: "orchestrator.hpp · cleanup_vm_resources()", f: ["uds"], s: { sock: { 0: false } } },
+      { t: "For each link: unlink_taps(tap0, tap1) deletes the FORWARD and MASQUERADE rules.", ref: "network.hpp · unlink_taps()", p: ["e-mgr-nf"], s: { link: false } },
+      { t: "teardown_cryo_network(): ip link set cryo-da05a06c down, ip tuntap del cryo-da05a06c.", ref: "network.hpp · teardown_cryo_network()", p: [["e-mgr-nf", "e-nf-tap0"]], s: { tap: { 0: false } } },
+      { t: "Delete /tmp/cryo-da05a06c.socket, cryo-da05a06c_rootfs.ext4, _state.snap and _mem.ram.", ref: "orchestrator.hpp · cleanup_vm_resources()", p: ["e-vm0-inst"], s: { disk: { 0: false }, snap: { 0: false } } },
+      { t: "Unlink /tmp/cryo-da05a06c_22.sock, _80.sock and _443.sock.", ref: "orchestrator.hpp · cleanup_vm_resources()", f: ["uds"], s: { sock: { 0: false } } },
       { t: "db.remove_vm(0) deletes the row. The HTTP handler also calls it and replies {status: deleted}.", ref: "database.hpp · remove_vm()", p: ["e-reaper-db", "-e-dash-api"], s: { vm: { 0: "absent" } } }
     ]
   },
@@ -222,31 +221,31 @@ CS.SCENARIOS = [
       { t: "The Firecracker process for VM 1 exits unexpectedly.", ref: "", f: ["vm1"], s: { vm: { 1: "dead" } } },
       { t: "Reaper: waitpid(-1, WNOHANG) returns that PID. Status is running, so the VM is treated as dead.", ref: "orchestrator.hpp · start_reaper()", p: ["e-mgr-reaper"] },
       { t: "Adopted VMs (not children of this daemon) are checked with kill(pid, 0) in the same 2-second loop.", ref: "orchestrator.hpp · start_reaper()", f: ["reaper"] },
-      { t: "cleanup_vm_resources(): remove links, delete TAP cryo1, delete disk and snapshot files and sockets, delete the DB row.", ref: "orchestrator.hpp · cleanup_vm_resources()", p: [["e-mgr-nf", "e-nf-tap1"], "e-vm1-inst", "e-reaper-db"], s: { vm: { 1: "absent" }, tap: { 1: false }, disk: { 1: false }, sock: { 1: false } } }
+      { t: "cleanup_vm_resources(): remove links, delete its TAP, delete disk and snapshot files and sockets, delete the DB row.", ref: "orchestrator.hpp · cleanup_vm_resources()", p: [["e-mgr-nf", "e-nf-tap1"], "e-vm1-inst", "e-reaper-db"], s: { vm: { 1: "absent" }, tap: { 1: false }, disk: { 1: false }, sock: { 1: false } } }
     ]
   },
   {
     id: "ssh", group: "Access", title: "SSH through a Unix socket", icon: "bi-terminal", c: "--ice",
-    trigger: "ssh -o ProxyCommand=\"nc -U /tmp/cryo_vm_0_22.sock\" root@localhost",
+    trigger: "ssh -o ProxyCommand=\"nc -U /tmp/cryo-da05a06c_22.sock\" root@localhost",
     summary: "SSH reaches the guest without any host TCP port: netcat talks to the socket and the Ghost Proxy relays to port 22.",
     note: "If the VM were hibernated, the Ghost Proxy would wake it first, exactly as in the HTTP auto-wake flow.",
     setup: RUN0,
     steps: [
       { t: "ssh runs nc -U, which connects to the VM's port-22 Unix socket. No host TCP port is opened.", ref: "DESIGN.md · SSH via ProxyCommand", p: ["e-ssh-uds"] },
-      { t: "The Ghost Proxy accept()s. status_fn(0) is false (the VM is running), so no wake is needed.", ref: "proxy.hpp · handle_proxy_client()", p: ["e-uds-gh"] },
-      { t: "connect() to 172.16.0.2:22 through TAP cryo0.", ref: "proxy.hpp · handle_proxy_client()", p: [["e-gh-tap0", "e-tap0-vm0"]] },
+      { t: "The Ghost Proxy accept()s. status_fn is false (the VM is running), so no wake is needed.", ref: "proxy.hpp · handle_proxy_client()", p: ["e-uds-gh"] },
+      { t: "connect() to 172.16.0.2:22 through the VM's TAP.", ref: "proxy.hpp · handle_proxy_client()", p: [["e-gh-tap0", "e-tap0-vm0"]] },
       { t: "relay_data threads pipe the SSH session both ways until either side closes.", ref: "proxy.hpp · relay_data()", p: [["-e-tap0-vm0", "-e-gh-tap0", "-e-uds-gh", "-e-ssh-uds"]] }
     ]
   },
   {
     id: "ports", group: "Access", title: "Expose or hide ports", icon: "bi-toggles", c: "--ice",
-    trigger: "PATCH /api/vms/0/ports",
+    trigger: "PATCH /api/vms/vm-da05a06c/ports",
     summary: "Turning a port on starts a socket listener; turning it off closes it and removes the socket file.",
     setup: Object.assign({}, RUN0, { sock: { 0: false } }),
     steps: [
-      { t: "The dashboard sends PATCH /api/vms/0/ports with ssh_exposed, http_exposed and https_exposed.", ref: "main.cpp · PATCH /api/vms/:id/ports", p: ["e-dash-api"] },
+      { t: "The dashboard sends PATCH /api/vms/vm-da05a06c/ports with ssh_exposed, http_exposed and https_exposed.", ref: "main.cpp · PATCH /api/vms/:id/ports", p: ["e-dash-api"] },
       { t: "update_vm_ports() updates memory and SQLite.", ref: "orchestrator.hpp · update_vm_ports()", p: [["e-api-mgr", "e-mgr-db"]] },
-      { t: "Each port turned on without a listener gets run_ghost_proxy(): bind /tmp/cryo_vm_0_<port>.sock, chmod 0666 so Nginx can use it.", ref: "proxy.hpp · run_ghost_proxy()", p: ["e-api-gh"], s: { sock: { 0: true } } },
+      { t: "Each port turned on without a listener gets run_ghost_proxy(): bind /tmp/cryo-da05a06c_<port>.sock, chmod 0666 so Nginx can use it.", ref: "proxy.hpp · run_ghost_proxy()", p: ["e-api-gh"], s: { sock: { 0: true } } },
       { t: "Each port turned off runs stop_ghost_proxy(): shutdown and close the listening fd, then unlink the socket file.", ref: "proxy.hpp · stop_ghost_proxy()", f: ["uds", "ghost"] },
       { t: "The API replies {status: ports updated}.", ref: "main.cpp", p: ["-e-dash-api"] }
     ]
@@ -257,8 +256,8 @@ CS.SCENARIOS = [
     summary: "The dashboard keeps itself current by polling three read endpoints.",
     setup: RUN01,
     steps: [
-      { t: "app.js fetches /api/vms, /api/links and /api/volumes in parallel.", ref: "internal/ui/app.js · fetchData()", p: ["e-dash-api"] },
-      { t: "/api/vms lists the VMs held in VMManager memory.", ref: "orchestrator.hpp · list_vms()", p: ["e-api-mgr"] },
+      { t: "app.js fetches /api/vms, /api/links and /api/volumes in parallel. Flask checks the session on each call and adds X-User-ID and X-Role.", ref: "internal/ui/app.js · fetchData()", p: ["e-dash-api"] },
+      { t: "/api/vms lists the VMs held in VMManager memory (an admin sees all, other users only their own).", ref: "orchestrator.hpp · list_vms()", p: ["e-api-mgr"] },
       { t: "/api/links and /api/volumes are read from SQLite.", ref: "database.hpp", p: [["e-api-mgr", "e-mgr-db", "-e-mgr-db"]] },
       { t: "JSON comes back and the cards, links and volume list are redrawn.", ref: "internal/ui/app.js", p: ["-e-dash-api"] }
     ]
@@ -270,32 +269,32 @@ CS.SCENARIOS = [
     setup: RUN0,
     steps: [
       { t: "The guest sends a packet to its default gateway 172.16.0.1 (set by the ip= kernel boot argument).", ref: "orchestrator.hpp · configure_and_start()", p: ["-e-tap0-vm0"] },
-      { t: "ip_forward=1 and FORWARD -i cryo0 -o <iface> ACCEPT let it leave the TAP.", ref: "network.hpp · setup_cryo_network()", p: ["-e-nf-tap0"] },
+      { t: "ip_forward=1 and FORWARD -i cryo-<hex> -o <iface> ACCEPT let it leave the TAP.", ref: "network.hpp · setup_cryo_network()", p: ["-e-nf-tap0"] },
       { t: "POSTROUTING MASQUERADE rewrites the source to the host's address.", ref: "network.hpp · init_cryo_firewall_baseline()", p: ["e-nf-inet"] },
       { t: "Replies match RELATED,ESTABLISHED, are translated back, and are forwarded to 172.16.0.2.", ref: "network.hpp", p: [["-e-nf-inet", "e-nf-tap0", "e-tap0-vm0"]] }
     ]
   },
   {
     id: "link", group: "Network", title: "Isolation, then linking", icon: "bi-link-45deg", c: "--run",
-    trigger: "POST /api/links {vm1: 0, vm2: 1}",
+    trigger: "POST /api/links {vm1_id, vm2_id} (UUIDs)",
     summary: "VMs cannot see each other by default. A link inserts four rules that open a path between two VMs of the same project.",
     setup: RUN01,
     steps: [
       { t: "VM 0 tries to reach VM 1. The baseline rule FORWARD -i cryo+ -o cryo+ -d 172.16.0.0/16 -j DROP blocks it.", ref: "network.hpp · init_cryo_firewall_baseline()", p: [{ e: "e-link", stop: 0.5, deny: true }] },
-      { t: "The dashboard sends POST /api/links.", ref: "main.cpp · POST /api/links", p: ["e-dash-api"] },
+      { t: "The dashboard sends POST /api/links with the two VM UUIDs.", ref: "main.cpp · POST /api/links", p: ["e-dash-api"] },
       { t: "link_microvms(): both VMs must exist and share a project; otherwise the API answers 400 \"Cross-project linking is denied\".", ref: "orchestrator.hpp · link_microvms()", p: ["e-api-mgr"] },
       { t: "db.add_link() stores the ordered pair (INSERT OR IGNORE).", ref: "database.hpp · add_link()", p: ["e-mgr-db"] },
-      { t: "link_taps(): FORWARD cryo0 ⇄ cryo1 ACCEPT and nat POSTROUTING MASQUERADE -o cryo0 / -o cryo1, all inserted at position 1.", ref: "network.hpp · link_taps()", p: ["e-mgr-nf"], s: { link: true } },
+      { t: "link_taps(): FORWARD tap0 ⇄ tap1 ACCEPT and nat POSTROUTING MASQUERADE -o tap0 / -o tap1, all inserted at position 1.", ref: "network.hpp · link_taps()", p: ["e-mgr-nf"], s: { link: true } },
       { t: "VM 0 and VM 1 can now talk in both directions.", ref: "", p: [["e-link", "-e-link"]] }
     ]
   },
   {
     id: "unlink", group: "Network", title: "Unlink VMs", icon: "bi-scissors", c: "--deny",
-    trigger: "DELETE /api/links/0/1",
+    trigger: "DELETE /api/links/:uuid1/:uuid2",
     summary: "Removing the link deletes the same four rules, and the baseline DROP applies again.",
     setup: Object.assign({}, RUN01, { link: true }),
     steps: [
-      { t: "The dashboard sends DELETE /api/links/0/1.", ref: "main.cpp · DELETE /api/links/:a/:b", p: ["e-dash-api"] },
+      { t: "The dashboard sends DELETE /api/links/vm-da05a06c/vm-1b2c3d4e.", ref: "main.cpp · DELETE /api/links/:a/:b", p: ["e-dash-api"] },
       { t: "unlink_microvms() removes the row from network_links.", ref: "database.hpp · remove_link()", p: [["e-api-mgr", "e-mgr-db"]] },
       { t: "unlink_taps(): iptables -D removes both FORWARD and both MASQUERADE rules.", ref: "network.hpp · unlink_taps()", p: ["e-mgr-nf"], s: { link: false } },
       { t: "Traffic between the two VMs is dropped again.", ref: "", p: [{ e: "e-link", stop: 0.5, deny: true }] }
@@ -311,7 +310,7 @@ CS.SCENARIOS = [
       { t: "The dashboard sends POST /api/volumes {name, size_gb}.", ref: "main.cpp · POST /api/volumes", p: ["e-dash-api"] },
       { t: "create_volume(): db.insert_volume() returns the new id (1).", ref: "orchestrator.hpp · create_volume()", p: [["e-api-mgr", "e-mgr-db"]] },
       { t: "truncate -s <size>G volumes/vol_1.ext4, then mkfs.ext4.", ref: "orchestrator.hpp · create_volume()", p: ["e-mgr-vols"], s: { volExists: true } },
-      { t: "POST /api/volumes/1/attach {vm_id: 1} sets attached_vm_id in SQLite.", ref: "main.cpp · POST /api/volumes/:id/attach", p: [["e-dash-api", "e-api-mgr", "e-mgr-db"]], s: { vol: 1 } },
+      { t: "POST /api/volumes/1/attach {vm_id: 'vm-1b2c3d4e'} maps the UUID to slot 1 and sets attached_vm_id in SQLite.", ref: "main.cpp · POST /api/volumes/:id/attach", p: [["e-dash-api", "e-api-mgr", "e-mgr-db"]], s: { vol: 1 } },
       { t: "VM 1 is running, so reboot_vm(1): status restarting, SIGKILL.", ref: "orchestrator.hpp · reboot_vm()", p: ["e-mgr-vm1"], s: { vm: { 1: "restarting" } } },
       { t: "Reaper sees restarting: keeps TAP and disk, only clears the PID.", ref: "orchestrator.hpp · start_reaper()", p: ["e-mgr-reaper"] },
       { t: "Fork a new Firecracker on the same API socket. Status booting.", ref: "orchestrator.hpp · reboot_vm()", p: ["e-mgr-vm1"], s: { vm: { 1: "booting" } } },

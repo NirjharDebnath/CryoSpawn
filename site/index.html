@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>CryoSpawn Flow Map</title>
-  <meta name="description" content="Animated map of how CryoSpawn creates, networks, hibernates, wakes and cleans up Firecracker MicroVMs.">
+  <meta name="description" content="Animated map of how CryoSpawn logs you in, creates, networks, hibernates, wakes and cleans up Firecracker MicroVMs.">
   <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'><text y='14' font-size='14'>❄</text></svg>">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -109,14 +109,23 @@
     <div class="section-head reveal">
       <div class="eyebrow">02 · Who does what</div>
       <h2>How the work is split</h2>
-      <p class="sub">One root daemon holds the state and spawns small threads for each job. Each VM is a separate Firecracker process. The Linux kernel and Nginx do the packet work.</p>
+      <p class="sub">A Flask frontend handles login and the dashboard. One root daemon holds the VM state and spawns small threads for each job. Each VM is a separate Firecracker process. The Linux kernel and Nginx do the packet work.</p>
     </div>
     <div class="row g-3">
+      <div class="col-lg-4 col-md-6 reveal">
+        <div class="panel work-card" style="--c:var(--wake)">
+          <div class="kind">process · Python</div>
+          <h3><i class="bi bi-person-lock"></i>Flask frontend</h3>
+          <div class="thread"><span class="spin"></span><div><b>Login and sessions</b> <span class="n">:8080</span><br><span class="text-muted-2">/api/auth/login, /logout and /me. Passwords are hashed in the users table.</span></div></div>
+          <div class="thread"><span class="spin" style="--c:var(--run)"></span><div><b>Page server</b> <span class="n">internal/ui/</span><br><span class="text-muted-2">Serves login, MicroVMs, Volumes, Networks and Settings; redirects to /login without a session.</span></div></div>
+          <div class="thread"><span class="spin" style="--c:var(--ice)"></span><div><b>API forwarder</b> <span class="n">/api/* → :9090</span><br><span class="text-muted-2">Adds X-User-ID and X-Role, then returns the daemon's answer (502 if it is down).</span></div></div>
+        </div>
+      </div>
       <div class="col-lg-4 col-md-6 reveal">
         <div class="panel work-card" style="--c:var(--ice)">
           <div class="kind">process · root</div>
           <h3><i class="bi bi-cpu"></i>cryospawn daemon</h3>
-          <div class="thread"><span class="spin"></span><div><b>HTTP server</b> <span class="n">httplib · :8080</span><br><span class="text-muted-2">Runs each REST handler and serves the dashboard files.</span></div></div>
+          <div class="thread"><span class="spin"></span><div><b>HTTP server</b> <span class="n">httplib · 127.0.0.1:9090</span><br><span class="text-muted-2">Runs each REST handler. It trusts the X-User-ID and X-Role headers from Flask.</span></div></div>
           <div class="thread"><span class="spin" style="--c:var(--run)"></span><div><b>configure_and_start</b> <span class="n">1 per create</span><br><span class="text-muted-2">Detached thread that configures Firecracker and boots the guest.</span></div></div>
           <div class="thread"><span class="spin" style="--c:var(--wake)"></span><div><b>Reaper</b> <span class="n">1 · every 2 s</span><br><span class="text-muted-2">waitpid() + kill(pid, 0); cleans up dead VMs and keeps hibernated or restarting ones.</span></div></div>
           <div class="thread"><span class="spin" style="--c:var(--disk)"></span><div><b>VMManager mutex</b> <span class="n">shared</span><br><span class="text-muted-2">Serialises changes to the in-memory VM map and their SQLite writes.</span></div></div>
@@ -126,7 +135,7 @@
         <div class="panel work-card" style="--c:var(--wake)">
           <div class="kind">threads inside the daemon</div>
           <h3><i class="bi bi-shuffle"></i>Ghost Proxy</h3>
-          <div class="thread"><span class="spin"></span><div><b>Listener</b> <span class="n">1 per exposed port</span><br><span class="text-muted-2">Owns /tmp/cryo_vm_N_P.sock (chmod 0666) and loops on accept().</span></div></div>
+          <div class="thread"><span class="spin"></span><div><b>Listener</b> <span class="n">1 per exposed port</span><br><span class="text-muted-2">Owns /tmp/cryo-&lt;hex&gt;_P.sock (chmod 0666) and loops on accept().</span></div></div>
           <div class="thread"><span class="spin"></span><div><b>Client handler</b> <span class="n">1 per connection</span><br><span class="text-muted-2">Wakes the VM if it is hibernated, then connects to guest IP:port.</span></div></div>
           <div class="thread"><span class="spin"></span><div><b>Relays</b> <span class="n">2 per connection</span><br><span class="text-muted-2">relay_data() copies bytes in each direction with an 8 KB buffer.</span></div></div>
         </div>
@@ -136,7 +145,7 @@
           <div class="kind">process · 1 per live VM</div>
           <h3><i class="bi bi-pc-display"></i>Firecracker</h3>
           <div class="thread"><span class="spin"></span><div><b>MicroVM</b> <span class="n">KVM guest</span><br><span class="text-muted-2">Started with fork() + execlp and setsid(), so stopping the daemon does not kill it.</span></div></div>
-          <div class="thread"><span class="spin"></span><div><b>API socket</b> <span class="n">/tmp/cryo_N.socket</span><br><span class="text-muted-2">The daemon configures it with PUT/PATCH: boot source, drives, NIC, machine config, snapshots.</span></div></div>
+          <div class="thread"><span class="spin"></span><div><b>API socket</b> <span class="n">/tmp/cryo-&lt;hex&gt;.socket</span><br><span class="text-muted-2">The daemon configures it with PUT/PATCH: boot source, drives, NIC, machine config, snapshots.</span></div></div>
           <div class="thread"><span class="spin" style="--c:var(--sleep)"></span><div><b>Hibernated</b> <span class="n">0 processes</span><br><span class="text-muted-2">The process is killed; the VM lives on only as .snap and .ram files.</span></div></div>
         </div>
       </div>
@@ -144,7 +153,7 @@
         <div class="panel work-card" style="--c:var(--net)">
           <div class="kind">Linux kernel</div>
           <h3><i class="bi bi-shield-lock"></i>TAP + netfilter</h3>
-          <div class="thread"><span class="spin"></span><div><b>TAP cryoN</b> <span class="n">1 per VM</span><br><span class="text-muted-2">Point-to-point /30 link between the host gateway and the guest.</span></div></div>
+          <div class="thread"><span class="spin"></span><div><b>TAP cryo-&lt;hex&gt;</b> <span class="n">1 per VM</span><br><span class="text-muted-2">Point-to-point /30 link between the host gateway and the guest.</span></div></div>
           <div class="thread"><span class="spin"></span><div><b>iptables</b> <span class="n">baseline + links</span><br><span class="text-muted-2">NAT to the internet, DROP between VMs, 4 extra rules per link.</span></div></div>
         </div>
       </div>
@@ -152,17 +161,17 @@
         <div class="panel work-card" style="--c:var(--ice)">
           <div class="kind">process · host</div>
           <h3><i class="bi bi-signpost-split"></i>Nginx ingress</h3>
-          <div class="thread"><span class="spin"></span><div><b>vmN.cryo</b> <span class="n">:80 and :443</span><br><span class="text-muted-2">A regex captures N from the host name and proxies to that VM's Unix socket.</span></div></div>
-          <div class="thread"><span class="spin"></span><div><b>/etc/hosts</b> <span class="n">127.0.0.1</span><br><span class="text-muted-2">Points vmN.cryo names at the local machine.</span></div></div>
+          <div class="thread"><span class="spin"></span><div><b>cryo-&lt;hex&gt;.cryo</b> <span class="n">:80 and :443</span><br><span class="text-muted-2">A regex captures the hex part from the host name and proxies to that VM's Unix socket.</span></div></div>
+          <div class="thread"><span class="spin"></span><div><b>/etc/hosts</b> <span class="n">127.0.0.1</span><br><span class="text-muted-2">Points cryo-&lt;hex&gt;.cryo names at the local machine.</span></div></div>
         </div>
       </div>
       <div class="col-lg-4 col-md-6 reveal">
         <div class="panel work-card" style="--c:var(--disk)">
           <div class="kind">files</div>
           <h3><i class="bi bi-device-hdd"></i>State on disk</h3>
-          <div class="thread"><span class="spin"></span><div><b>cryospawn.db</b> <span class="n">SQLite</span><br><span class="text-muted-2">Tables vms, network_links and volumes; read again on every startup.</span></div></div>
+          <div class="thread"><span class="spin"></span><div><b>cryospawn.db</b> <span class="n">SQLite</span><br><span class="text-muted-2">Tables vms, network_links and volumes (daemon) plus users (Flask); read again on every startup.</span></div></div>
           <div class="thread"><span class="spin"></span><div><b>instances/</b> <span class="n">per VM</span><br><span class="text-muted-2">Its own copy of the rootfs, plus snapshot files while it is hibernated.</span></div></div>
-          <div class="thread"><span class="spin"></span><div><b>volumes/</b> <span class="n">vol_N.ext4</span><br><span class="text-muted-2">Extra ext4 disks attached as additional Firecracker drives.</span></div></div>
+          <div class="thread"><span class="spin"></span><div><b>volumes/</b> <span class="n">vol_&lt;id&gt;.ext4</span><br><span class="text-muted-2">Extra ext4 disks attached as additional Firecracker drives.</span></div></div>
         </div>
       </div>
     </div>
@@ -197,8 +206,8 @@
   <div class="wrap">
     <div class="section-head reveal">
       <div class="eyebrow">04 · Addressing</div>
-      <h2>Everything comes from the slot number</h2>
-      <p class="sub">create_vm() derives each VM's network, sockets and file names from its slot with <code>base = slot × 4</code>. Move the slider to see what a slot owns.</p>
+      <h2>Network from the slot, names from the UUID</h2>
+      <p class="sub">create_vm() derives each VM's IP addresses and MAC from its slot with <code>base = slot × 4</code>. Its TAP, sockets, file names and API identifier come from a random UUID instead. Move the slider to see what a slot owns.</p>
     </div>
     <div class="panel p-4 calc reveal">
       <div class="row g-4 align-items-center">
@@ -220,6 +229,7 @@
         <div class="col-lg-8">
           <dl class="kv mb-0">
             <dt>base</dt><dd id="c-base"></dd>
+            <dt>VM UUID</dt><dd id="c-uuid"></dd>
             <dt>subnet</dt><dd id="c-subnet"></dd>
             <dt>host gateway</dt><dd id="c-host"></dd>
             <dt>guest IP</dt><dd id="c-guest"></dd>
@@ -254,6 +264,7 @@
     <div class="d-flex flex-wrap gap-3">
       <a href="https://github.com/NirjharDebnath/CryoSpawn/blob/main/README.md">README</a>
       <a href="https://github.com/NirjharDebnath/CryoSpawn/blob/main/DESIGN.md">Design</a>
+      <a href="https://github.com/NirjharDebnath/CryoSpawn/blob/main/docs/SETUP.md">Setup</a>
       <a href="https://github.com/NirjharDebnath/CryoSpawn/blob/main/docs/API.md">API</a>
       <a href="https://github.com/NirjharDebnath/CryoSpawn/blob/main/docs/KNOWN-ISSUES.md">Known issues</a>
     </div>
