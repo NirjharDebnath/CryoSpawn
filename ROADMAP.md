@@ -103,7 +103,14 @@ CryoSpawn is designed to bridge the gap between Docker's speed and KVM's securit
 - [x] Namespace all Linux host artifacts (TAP interfaces, Firecracker sockets, Elastic Volumes, RootFS files) under the strict 15-byte `IFNAMSIZ` limit using `cryo-[hex]` schemas.
 - [x] Auto-repair SQLite databases to backfill UUIDs on legacy booted environments.
 
-### Phase 7: Multi-Tenant Authentication & Project Scoping (RBAC)
+### Phase 7: Multi-Tenant Authentication & Project Scoping (RBAC) — in progress
+* **Done so far:**
+  - [x] Flask frontend with session login, logout and `/api/auth/me` (`frontend/app.py`).
+  - [x] `users` table with hashed passwords and a default `admin` account.
+  - [x] Dashboard split into login, MicroVMs, Volumes, Networks and Settings pages.
+  - [x] Daemon moved to `127.0.0.1:9090`; Flask forwards requests with `X-User-ID` and `X-Role` headers.
+  - [x] `owner_id` columns and admin-versus-user filtering for VM lists.
+* **Still open:** record the caller as owner when a VM is created, enforce ownership on delete, link and volume routes, user registration and password change, auditor role (see [docs/KNOWN-ISSUES.md](docs/KNOWN-ISSUES.md)).
 * **Goal:** Enable multiple users to utilize CryoSpawn concurrently with strictly enforced security boundaries.
 * **Key Tasks:**
   1. Add an identity and session layer (`users` table with bcrypt password hashing and secure token generation).
@@ -154,8 +161,8 @@ CryoSpawn is designed to bridge the gap between Docker's speed and KVM's securit
 
 ## 5. Implementation Sequence & Next Step
 
-The next immediate technological milestone to execute is:
+The next immediate technological milestone is to finish:
 👉 **Phase 7: Multi-Tenant Authentication & Project Scoping (RBAC)**
-- Introduce SQLite-backed user credentials and hashing.
-- Build the frontend authentication gate.
-- Refactor the API endpoints to enforce tenant visibility and authorization token verification.
+- SQLite-backed user credentials and hashing: done.
+- Frontend authentication gate: done.
+- Enforce tenant visibility and ownership on every API endpoint: still to do.
