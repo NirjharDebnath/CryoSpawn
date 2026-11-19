@@ -39,17 +39,67 @@
             
             
 <div class="bg-white rounded-xl border border-slate-200 shadow-sm p-6">
-    <h3 class="text-lg font-semibold text-slate-800 mb-4">Account Settings</h3>
-    <p class="text-sm text-slate-600 mb-4">Manage your profile, API tokens, and preferences.</p>
+    <h3 class="text-lg font-semibold text-slate-800 mb-2">Account Security</h3>
+    <p class="text-sm text-slate-600 mb-6">Update your password to keep your CryoSpawn account secure.</p>
     
-    <div class="space-y-4 max-w-md">
+    <form id="change-pwd-form" class="space-y-4 max-w-md">
         <div>
-            <label class="block text-sm font-medium text-slate-700 mb-1">Change Password</label>
-            <input type="password" placeholder="New Password" class="w-full border border-slate-300 rounded-md px-3 py-2 text-sm mb-2">
-            <button class="bg-slate-900 text-white px-4 py-2 rounded-md text-sm hover:bg-slate-800">Update Password</button>
+            <label class="block text-xs font-medium text-slate-700 mb-1">Current Password</label>
+            <input type="password" id="current-password" required class="w-full border border-slate-300 rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
         </div>
-    </div>
+        <div>
+            <label class="block text-xs font-medium text-slate-700 mb-1">New Password (min 6 chars)</label>
+            <input type="password" id="new-password" required minlength="6" class="w-full border border-slate-300 rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
+        </div>
+        <div>
+            <label class="block text-xs font-medium text-slate-700 mb-1">Confirm New Password</label>
+            <input type="password" id="confirm-password" required minlength="6" class="w-full border border-slate-300 rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
+        </div>
+        <button type="submit" id="pwd-btn" class="bg-slate-900 text-white px-4 py-2 rounded-md text-sm hover:bg-slate-800 transition-colors">Update Password</button>
+        <p id="pwd-msg" class="text-sm mt-2 hidden"></p>
+    </form>
 </div>
+
+<script>
+    document.getElementById('change-pwd-form')?.addEventListener('submit', async (e) => {
+        e.preventDefault();
+        const current_password = document.getElementById('current-password').value;
+        const new_password = document.getElementById('new-password').value;
+        const confirm_password = document.getElementById('confirm-password').value;
+        const msg = document.getElementById('pwd-msg');
+        msg.classList.add('hidden');
+
+        if (new_password !== confirm_password) {
+            msg.textContent = "New passwords do not match.";
+            msg.className = "text-sm text-red-600 mt-2";
+            msg.classList.remove('hidden');
+            return;
+        }
+
+        try {
+            const res = await fetch('/api/auth/change-password', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({ current_password, new_password })
+            });
+            const data = await res.json();
+            if (res.ok) {
+                msg.textContent = data.message || "Password updated successfully.";
+                msg.className = "text-sm text-green-600 mt-2";
+                msg.classList.remove('hidden');
+                document.getElementById('change-pwd-form').reset();
+            } else {
+                msg.textContent = data.error || "Failed to update password.";
+                msg.className = "text-sm text-red-600 mt-2";
+                msg.classList.remove('hidden');
+            }
+        } catch (err) {
+            msg.textContent = "Network error: " + err.message;
+            msg.className = "text-sm text-red-600 mt-2";
+            msg.classList.remove('hidden');
+        }
+    });
+</script>
 
         </div>
     </main>

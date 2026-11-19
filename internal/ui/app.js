@@ -63,16 +63,15 @@ function renderTable(vms) {
     const html = vms.map(vm => {
         let statusBadge = '';
         let actionButtons = '';
-        const hex = vm.uuid.substring(3);
+        const hex = vm.uuid.startsWith('vm-') ? vm.uuid.substring(3) : vm.uuid;
 
         if (vm.status === 'running') {
             statusBadge = `<span class="inline-flex items-center px-2 py-0.5 rounded text-[10px] font-medium bg-green-100 text-green-800"><span class="w-1.5 h-1.5 rounded-full bg-green-500 mr-1.5"></span>Running</span>`;
             
             actionButtons = ``;
-            // Only show SSH copy button if SSH port is actually toggled ON
             if (vm.ssh_exposed) {
                 actionButtons += `
-                    <button onclick="copySSH(this, '${vm.uuid}')" class="text-xs font-medium text-blue-600 bg-blue-50 hover:bg-blue-100 px-3 py-1.5 rounded-md transition-colors border border-blue-200">
+                    <button onclick="copySSH(this, '${vm.uuid}', ${vm.host_port || 0})" class="text-xs font-medium text-blue-600 bg-blue-50 hover:bg-blue-100 px-3 py-1.5 rounded-md transition-colors border border-blue-200">
                         <svg class="w-3 h-3 mr-1 inline" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z"></path></svg>
                         SSH
                     </button>
@@ -82,12 +81,22 @@ function renderTable(vms) {
                 <button onclick="hibernateVM('${vm.uuid}')" class="text-xs font-medium text-orange-600 bg-orange-50 hover:bg-orange-100 px-3 py-1.5 rounded-md transition-colors border border-transparent hover:border-orange-200">
                     Hibernate
                 </button>
+                <button onclick="restartVM('${vm.uuid}')" class="text-xs font-medium text-slate-600 bg-slate-100 hover:bg-slate-200 px-3 py-1.5 rounded-md transition-colors border border-transparent hover:border-slate-300">
+                    Restart
+                </button>
             `;
         } else if (vm.status === 'hibernated') {
             statusBadge = `<span class="inline-flex items-center px-2 py-0.5 rounded text-[10px] font-medium bg-orange-100 text-orange-800"><span class="w-1.5 h-1.5 rounded-full bg-orange-500 mr-1.5"></span>Hibernated</span>`;
             actionButtons = `
                 <button onclick="wakeVM('${vm.uuid}')" class="text-xs font-medium text-green-600 bg-green-50 hover:bg-green-100 px-3 py-1.5 rounded-md transition-colors border border-transparent hover:border-green-200">
                     Wake VM
+                </button>
+            `;
+        } else if (vm.status === 'stopped') {
+            statusBadge = `<span class="inline-flex items-center px-2 py-0.5 rounded text-[10px] font-medium bg-slate-200 text-slate-800"><span class="w-1.5 h-1.5 rounded-full bg-slate-500 mr-1.5"></span>Stopped</span>`;
+            actionButtons = `
+                <button onclick="wakeVM('${vm.uuid}')" class="text-xs font-medium text-green-600 bg-green-50 hover:bg-green-100 px-3 py-1.5 rounded-md transition-colors border border-transparent hover:border-green-200">
+                    Start VM
                 </button>
             `;
         } else {
@@ -99,7 +108,11 @@ function renderTable(vms) {
         if (vm.http_exposed) domains += `<div class="mt-1"><a href="http://cryo-${hex}.cryo" target="_blank" class="text-blue-500 hover:underline text-[10px]">http://cryo-${hex}.cryo</a></div>`;
         if (vm.https_exposed) domains += `<div class="mt-0.5"><a href="https://cryo-${hex}.cryo" target="_blank" class="text-green-500 hover:underline text-[10px]">https://cryo-${hex}.cryo</a></div>`;
 
-        // Interactive port toggles
+        let hostPortInfo = '';
+        if (vm.ssh_exposed && vm.host_port > 0) {
+            hostPortInfo = `<div class="text-[10px] font-mono text-blue-600 mt-1">SSH Port: ${vm.host_port}</div>`;
+        }
+
         const toggleUI = `
             <div class="mt-3 space-y-2">
                 <label class="flex items-center cursor-pointer">
@@ -135,6 +148,7 @@ function renderTable(vms) {
             <td class="px-6 py-4">
                 <div class="text-xs text-slate-700 font-medium">${vm.vcpus} vCPU / ${vm.mem_mib} MB RAM</div>
                 <div class="text-[10px] text-slate-500 mt-0.5">${vm.rootfs_gb} GB Disk</div>
+                ${hostPortInfo}
                 ${toggleUI}
                 ${domains}
             </td>
@@ -174,13 +188,16 @@ if (spawnForm) {
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify(payload)
             });
-            if (!response.ok) throw new Error("Server rejected request");
+            if (!response.ok) {
+                const data = await response.json().catch(() => ({}));
+                throw new Error(data.error || "Server rejected request");
+            }
             fetchData();
         } catch (error) {
             alert("Failed to spawn VM: " + error.message);
         } finally {
             spawnBtn.disabled = false;
-            spawnBtn.textContent = "Initialize VM";
+            spawnBtn.textContent = "Deploy MicroVM";
         }
     });
 }
@@ -227,17 +244,25 @@ if (linkForm) {
         e.preventDefault();
         const vm1_uuid = linkVm1.value;
         const vm2_uuid = linkVm2.value;
-        if (!vm1_uuid || !vm2_uuid || vm1_uuid === vm2_uuid) { alert("Please select two different VMs."); return; }
+        if (!vm1_uuid || !vm2_uuid || vm1_uuid === vm2_uuid) { 
+            alert("Please select two different running VMs to bridge."); 
+            return; 
+        }
         
         try {
-            await fetch(LINKS_API_URL, {
+            const res = await fetch(LINKS_API_URL, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ vm1_id: vm1_uuid, vm2_id: vm2_uuid })
             });
-            fetchData();
-        } catch {
-            alert("Failed to bridge VMs.");
+            const data = await res.json();
+            if (!res.ok) {
+                alert("Failed to bridge VMs: " + (data.error || "Unknown error"));
+            } else {
+                fetchData();
+            }
+        } catch (err) {
+            alert("Failed to bridge VMs: " + err.message);
         }
     });
 }
@@ -255,20 +280,27 @@ function renderVolumes(volumes, vms) {
         if (el && el.value) prevSelections[vol.id] = el.value;
     });
 
-    const vmOptions = vms.map(v => `<option value="${v.uuid}">${v.name || "VM " + v.id} (${v.ip})</option>`).join('');
+    const hasVMs = vms.length > 0;
+    const vmOptions = hasVMs 
+        ? vms.map(v => `<option value="${v.uuid}">${v.name || "VM " + v.id} (${v.ip})</option>`).join('')
+        : `<option value="" disabled selected>No VMs available</option>`;
 
     volumesContainer.innerHTML = volumes.map(vol => {
         const attached = vol.attached_vm_id !== -1;
+        const attachedText = (vol.attached_vm_name || vol.attached_vm_uuid) 
+            ? `Attached to: ${vol.attached_vm_name || vol.attached_vm_uuid}`
+            : 'In Use';
+
         const statusBadge = attached 
-            ? `<span class="inline-flex items-center px-2 py-0.5 rounded text-[10px] font-medium bg-green-100 text-green-800">In Use</span>`
+            ? `<span class="inline-flex items-center px-2 py-0.5 rounded text-[10px] font-medium bg-green-100 text-green-800">${attachedText}</span>`
             : `<span class="inline-flex items-center px-2 py-0.5 rounded text-[10px] font-medium bg-slate-100 text-slate-600">Available</span>`;
 
         let actionHtml = attached ? `
-            <button onclick="detachVolume(${vol.id})" class="text-xs font-medium bg-orange-100 text-orange-700 hover:bg-orange-200 px-3 py-1.5 rounded-md">Detach</button>
+            <button onclick="detachVolume(${vol.id})" class="text-xs font-medium bg-orange-100 text-orange-700 hover:bg-orange-200 px-3 py-1.5 rounded-md transition-colors">Detach</button>
         ` : `
             <div class="flex items-center space-x-2">
-                <select id="attach-select-${vol.id}" class="text-xs border rounded-md px-2 py-1.5">${vmOptions}</select>
-                <button onclick="attachVolume(${vol.id})" class="text-xs font-medium bg-indigo-600 text-white hover:bg-indigo-700 px-3 py-1.5 rounded-md">Attach</button>
+                <select id="attach-select-${vol.id}" class="text-xs border rounded-md px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-blue-500" ${hasVMs ? '' : 'disabled'}>${vmOptions}</select>
+                <button onclick="attachVolume(${vol.id})" class="text-xs font-medium bg-indigo-600 text-white hover:bg-indigo-700 px-3 py-1.5 rounded-md transition-colors" ${hasVMs ? '' : 'disabled'}>Attach</button>
             </div>
         `;
 
@@ -283,7 +315,7 @@ function renderVolumes(volumes, vms) {
                 </div>
                 <div class="flex items-center space-x-2">
                     ${actionHtml}
-                    <button onclick="deleteVolume(${vol.id})" class="text-xs text-red-600 bg-red-50 hover:bg-red-100 px-3 py-1.5 rounded-md">Delete</button>
+                    <button onclick="deleteVolume(${vol.id})" class="text-xs text-red-600 bg-red-50 hover:bg-red-100 px-3 py-1.5 rounded-md transition-colors">Delete</button>
                 </div>
             </div>
         `;
@@ -302,58 +334,153 @@ if (volumeForm) {
         e.preventDefault();
         const btn = document.getElementById('vol-btn');
         btn.disabled = true;
-        const payload = {
-            name: document.getElementById('vol-name').value.trim(),
-            size_gb: parseInt(document.getElementById('vol-size').value)
-        };
+        const name = document.getElementById('vol-name').value.trim();
+        const size_gb = parseInt(document.getElementById('vol-size').value);
+
+        if (!name || isNaN(size_gb) || size_gb < 1 || size_gb > 1000) {
+            alert("Please enter a valid volume name and a size between 1 and 1000 GB.");
+            btn.disabled = false;
+            return;
+        }
+
         try {
-            await fetch(VOLUMES_API_URL, {
+            const res = await fetch(VOLUMES_API_URL, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(payload)
+                body: JSON.stringify({ name, size_gb })
             });
-            document.getElementById('vol-name').value = '';
-            document.getElementById('vol-size').value = '';
-            fetchData();
+            const data = await res.json();
+            if (res.ok) {
+                document.getElementById('vol-name').value = '';
+                document.getElementById('vol-size').value = '';
+                fetchData();
+            } else {
+                alert("Failed to create volume: " + (data.error || "Unknown error"));
+            }
+        } catch (err) {
+            alert("Network error: " + err.message);
         } finally { btn.disabled = false; }
     });
 }
 
-
 async function updatePorts(uuid, ssh, http, https) {
     try {
-        await fetch(`${API_URL}/${uuid}/ports`, {
+        const res = await fetch(`${API_URL}/${uuid}/ports`, {
             method: 'PATCH',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ ssh_exposed: ssh, http_exposed: http, https_exposed: https })
         });
+        const data = await res.json();
+        if (!res.ok) {
+            alert("Failed to update ports: " + (data.error || "Unknown error"));
+        }
         fetchData();
-    } catch {
-        alert("Failed to update ports.");
+    } catch (err) {
+        alert("Failed to update ports: " + err.message);
     }
 }
 
-async function deleteVM(uuid) { if (confirm("Delete VM?")) { await fetch(`${API_URL}/${uuid}`, {method:'DELETE'}); fetchData(); } }
-async function hibernateVM(uuid) { await fetch(`${API_URL}/${uuid}/hibernate`, {method:'POST'}); fetchData(); }
-async function wakeVM(uuid) { await fetch(`${API_URL}/${uuid}/wake`, {method:'POST'}); fetchData(); }
-async function unlinkVMs(vm1, vm2) { await fetch(`${LINKS_API_URL}/${vm1}/${vm2}`, {method:'DELETE'}); fetchData(); }
-async function deleteVolume(id) { if (confirm("Delete Volume?")) { await fetch(`${VOLUMES_API_URL}/${id}`, {method:'DELETE'}); fetchData(); } }
+async function deleteVM(uuid) { 
+    if (confirm("Permanently delete this microVM and free disk resources?")) { 
+        const res = await fetch(`${API_URL}/${uuid}`, {method:'DELETE'}); 
+        if (!res.ok) {
+            const data = await res.json().catch(() => ({}));
+            alert("Failed to delete VM: " + (data.error || "Unknown error"));
+        }
+        fetchData(); 
+    } 
+}
+
+async function restartVM(uuid) {
+    if (confirm("Restart this microVM?")) {
+        const res = await fetch(`${API_URL}/${uuid}/restart`, {method:'POST'});
+        if (!res.ok) {
+            const data = await res.json().catch(() => ({}));
+            alert("Failed to restart VM: " + (data.error || "Unknown error"));
+        }
+        fetchData();
+    }
+}
+
+async function hibernateVM(uuid) { 
+    const res = await fetch(`${API_URL}/${uuid}/hibernate`, {method:'POST'}); 
+    if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        alert("Failed to hibernate VM: " + (data.error || "Unknown error"));
+    }
+    fetchData(); 
+}
+
+async function wakeVM(uuid) { 
+    const res = await fetch(`${API_URL}/${uuid}/wake`, {method:'POST'}); 
+    if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        alert("Failed to start/wake VM: " + (data.error || "Unknown error"));
+    }
+    fetchData(); 
+}
+
+async function unlinkVMs(vm1, vm2) { 
+    const res = await fetch(`${LINKS_API_URL}/${vm1}/${vm2}`, {method:'DELETE'}); 
+    if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        alert("Failed to unlink VMs: " + (data.error || "Unknown error"));
+    }
+    fetchData(); 
+}
+
+async function deleteVolume(id) { 
+    if (confirm("Delete this volume?")) { 
+        const res = await fetch(`${VOLUMES_API_URL}/${id}`, {method:'DELETE'}); 
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) {
+            alert("Failed to delete volume: " + (data.error || "Unknown error"));
+        }
+        fetchData(); 
+    } 
+}
+
 async function attachVolume(vol_id) {
-    const vm_uuid = document.getElementById(`attach-select-${vol_id}`).value;
-    if (confirm("Attaching will REBOOT the target VM. Proceed?")) {
-        await fetch(`${VOLUMES_API_URL}/${vol_id}/attach`, { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({vm_id: vm_uuid})});
+    const select = document.getElementById(`attach-select-${vol_id}`);
+    const vm_uuid = select ? select.value : "";
+    if (!vm_uuid) {
+        alert("Please select a target MicroVM to attach this volume to.");
+        return;
+    }
+    if (confirm("Attaching will reload the target VM to mount the block device. Proceed?")) {
+        const res = await fetch(`${VOLUMES_API_URL}/${vol_id}/attach`, { 
+            method: 'POST', 
+            headers: {'Content-Type': 'application/json'}, 
+            body: JSON.stringify({vm_id: vm_uuid})
+        });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) {
+            alert("Failed to attach volume: " + (data.error || "Unknown error"));
+        }
         fetchData();
     }
 }
+
 async function detachVolume(vol_id) {
-    if (confirm("Detaching will REBOOT the target VM. Proceed?")) {
-        await fetch(`${VOLUMES_API_URL}/${vol_id}/detach`, {method:'POST'});
+    if (confirm("Detaching will reload the target VM to safely unmount the drive. Proceed?")) {
+        const res = await fetch(`${VOLUMES_API_URL}/${vol_id}/detach`, {method:'POST'});
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) {
+            alert("Failed to detach volume: " + (data.error || "Unknown error"));
+        }
         fetchData();
     }
 }
-function copySSH(btn, uuid) {
-    const hex = uuid.substring(3);
-    const cmd = `ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ProxyCommand="nc -U /tmp/cryo-${hex}_22.sock" root@localhost`;
+
+function copySSH(btn, uuid, hostPort) {
+    const hex = uuid.startsWith('vm-') ? uuid.substring(3) : uuid;
+    let cmd = "";
+    if (hostPort && parseInt(hostPort) > 0) {
+        cmd = `ssh -p ${hostPort} root@localhost`;
+    } else {
+        cmd = `ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ProxyCommand="nc -U /tmp/cryo-${hex}_22.sock" root@localhost`;
+    }
+
     navigator.clipboard.writeText(cmd).then(() => {
         const originalHtml = btn.innerHTML;
         btn.innerHTML = `<svg class="w-3 h-3 mr-1 inline" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"></path></svg> Copied!`;
