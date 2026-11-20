@@ -43,6 +43,7 @@ struct MicroVM {
     bool https_exposed = false;
     int host_port = 0;
     std::string project_name = "default";
+    bool allow_interproject_routing = false;
 };
 
 class VMManager {
@@ -145,6 +146,7 @@ public:
         stop_all_ghost_proxies_for_vm(get_hex(vm.uuid), vm.id, vm.host_port);
 
         db.remove_vm(vm.id);
+        db.cleanup_orphaned_links();
     }
 
     void reconcile_state() {
@@ -170,6 +172,7 @@ public:
             vm.uuid = r.uuid;
             vm.name = r.name;
             vm.owner_id = r.owner_id;
+            vm.allow_interproject_routing = r.allow_interproject_routing;
 
             if (vm.uuid.empty()) {
                 vm.uuid = generate_vm_id();
@@ -194,6 +197,7 @@ public:
                 cleanup_vm_resources(vm);
             }
         }
+        db.cleanup_orphaned_links();
     }
 
     void start_reaper() {
@@ -251,7 +255,7 @@ public:
         }).detach();
     }
 
-    VMManager() {
+    VMManager(const std::string& db_path = config::get_db_path()) : db(db_path) {
         active_iface = get_default_interface();
         init_cryo_firewall_baseline(active_iface);
         std::filesystem::create_directories(config::BASE_PATH + "/instances");
@@ -261,7 +265,7 @@ public:
     }
 
     // Provisions slot, IP, UUID, TAP, and saves metadata in SQLite
-    MicroVM create_vm(int vcpus, int mem_mib, bool expose_ssh, bool expose_http, bool expose_https, const std::string& project, int rootfs_gb, const std::string& name, int owner_id = 1) {
+    MicroVM create_vm(int vcpus, int mem_mib, bool expose_ssh, bool expose_http, bool expose_https, const std::string& project, int rootfs_gb, const std::string& name, int owner_id = 1, bool allow_interproject_routing = false) {
         std::lock_guard<std::mutex> lock(mtx);
         int slot = db.get_next_free_slot();
         int base = slot * 4;
@@ -270,6 +274,7 @@ public:
         vm.id = slot;
         vm.name = name.empty() ? ("vm-" + std::to_string(slot)) : name;
         vm.owner_id = owner_id;
+        vm.allow_interproject_routing = allow_interproject_routing;
         do {
             vm.uuid = generate_vm_id();
         } while (active_uuids.find(vm.uuid) != active_uuids.end());
@@ -308,7 +313,7 @@ public:
         vm.pid = pid;
         vms[vm.id] = vm;
         pid_to_slot[pid] = vm.id;
-        db.insert_vm(slot, pid, "booting", vcpus, mem_mib, vm.ip, vm.host_ip, vm.tap_name, expose_ssh, vm.host_port, vm.project_name, expose_http, expose_https, vm.rootfs_gb, vm.uuid, vm.name, owner_id);
+        db.insert_vm(slot, pid, "booting", vcpus, mem_mib, vm.ip, vm.host_ip, vm.tap_name, expose_ssh, vm.host_port, vm.project_name, expose_http, expose_https, vm.rootfs_gb, vm.uuid, vm.name, owner_id, allow_interproject_routing);
         return vm;
     }
 
@@ -393,6 +398,7 @@ public:
         {
             std::lock_guard<std::mutex> lock(mtx);
             if (vms.find(id) == vms.end()) return false;
+            if (vms[id].status == "terminating") return false;
             if (vms[id].pid > 0) {
                 vms[id].status = "restarting";
                 kill(vms[id].pid, SIGKILL);
@@ -573,6 +579,7 @@ public:
         {
             std::lock_guard<std::mutex> lock(mtx);
             if (vms.find(id) == vms.end()) return false;
+            if (vms[id].status == "terminating") return false;
             vm = vms[id];
         }
 
@@ -627,28 +634,109 @@ public:
         return vms[id].owner_id == user_id;
     }
 
-    bool can_user_link(int id1, int id2, int user_id, bool is_admin) {
-        if (is_admin) return true;
+    bool get_vm(int id, MicroVM& vm) {
         std::lock_guard<std::mutex> lock(mtx);
-        if (vms.find(id1) == vms.end() || vms.find(id2) == vms.end()) return false;
-        return (vms[id1].owner_id == user_id && vms[id2].owner_id == user_id);
+        if (vms.find(id) != vms.end()) {
+            vm = vms[id];
+            return true;
+        }
+        return false;
     }
 
-    bool link_microvms(int id1, int id2, int owner_id = 1) {
+    int get_vm_owner(int id) {
         std::lock_guard<std::mutex> lock(mtx);
+        if (vms.find(id) != vms.end()) return vms[id].owner_id;
+        return -1;
+    }
+
+    void update_vm_routing(int id, bool allow_interproject_routing) {
+        std::lock_guard<std::mutex> lock(mtx);
+        if (vms.find(id) != vms.end()) {
+            vms[id].allow_interproject_routing = allow_interproject_routing;
+            db.update_vm_routing(id, allow_interproject_routing);
+
+            // If inter-project routing is revoked, proactively sever any active cross-project links
+            if (!allow_interproject_routing) {
+                auto links = db.get_all_links();
+                for (const auto& link : links) {
+                    if (link.vm1_id == id || link.vm2_id == id) {
+                        int other_id = (link.vm1_id == id) ? link.vm2_id : link.vm1_id;
+                        if (vms.find(other_id) != vms.end()) {
+                            if (vms[other_id].project_name != vms[id].project_name) {
+                                db.remove_link(link.vm1_id, link.vm2_id);
+                                unlink_taps(vms[id].tap_name, vms[other_id].tap_name);
+                            }
+                        } else {
+                            db.remove_link(link.vm1_id, link.vm2_id);
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    bool can_user_link(int id1, int id2, int user_id, bool is_admin) {
+        std::lock_guard<std::mutex> lock(mtx);
+        if (id1 == id2) return false;
         if (vms.find(id1) == vms.end() || vms.find(id2) == vms.end()) return false;
-        if (vms[id1].project_name != vms[id2].project_name) return false; 
-        if (db.add_link(vms[id1].project_name, id1, id2, owner_id)) {
+        if (vms[id1].status == "terminating" || vms[id2].status == "terminating") return false;
+        // Cross-user network links remain strictly forbidden; any attempt to bridge VMs belonging to different owners must be rejected with HTTP 403 Forbidden
+        if (vms[id1].owner_id != vms[id2].owner_id) return false;
+        // Non-admin users cannot link resources owned by other users
+        if (!is_admin && vms[id1].owner_id != user_id) return false;
+        return true;
+    }
+
+    bool can_user_unlink(int id1, int id2, int user_id, bool is_admin) {
+        std::lock_guard<std::mutex> lock(mtx);
+        if (id1 == id2) return false;
+        if (is_admin) return true;
+        if (vms.find(id1) == vms.end() || vms.find(id2) == vms.end()) return false;
+        if (vms[id1].owner_id != user_id || vms[id2].owner_id != user_id) return false;
+        return true;
+    }
+
+    bool can_route_interproject(int id1, int id2) {
+        std::lock_guard<std::mutex> lock(mtx);
+        if (id1 == id2) return false;
+        if (vms.find(id1) == vms.end() || vms.find(id2) == vms.end()) return false;
+        if (vms[id1].status == "terminating" || vms[id2].status == "terminating") return false;
+        if (vms[id1].project_name == vms[id2].project_name) return true;
+        return (vms[id1].allow_interproject_routing && vms[id2].allow_interproject_routing);
+    }
+
+    bool link_microvms(int id1, int id2, int owner_id = -1) {
+        std::lock_guard<std::mutex> lock(mtx);
+        if (id1 == id2) return false;
+        if (vms.find(id1) == vms.end() || vms.find(id2) == vms.end()) return false;
+        if (vms[id1].status == "terminating" || vms[id2].status == "terminating") return false;
+        if (vms[id1].owner_id != vms[id2].owner_id) return false;
+        bool same_proj = (vms[id1].project_name == vms[id2].project_name);
+        if (!same_proj && (!vms[id1].allow_interproject_routing || !vms[id2].allow_interproject_routing)) {
+            return false;
+        }
+        int effective_owner = (owner_id > 0) ? owner_id : vms[id1].owner_id;
+        std::string link_proj = same_proj ? vms[id1].project_name : "interproject";
+        if (db.add_link(link_proj, id1, id2, effective_owner)) {
             link_taps(vms[id1].tap_name, vms[id2].tap_name);
         }
         return true;
     }
 
+    void add_vm_for_test(const MicroVM& vm) {
+        std::lock_guard<std::mutex> lock(mtx);
+        vms[vm.id] = vm;
+        active_uuids.insert(vm.uuid);
+        db.insert_vm(vm.id, vm.pid, vm.status, vm.vcpus, vm.mem_mib, vm.ip, vm.host_ip, vm.tap_name, vm.ssh_exposed, vm.host_port, vm.project_name, vm.http_exposed, vm.https_exposed, vm.rootfs_gb, vm.uuid, vm.name, vm.owner_id, vm.allow_interproject_routing);
+    }
+
     bool unlink_microvms(int id1, int id2) {
         std::lock_guard<std::mutex> lock(mtx);
-        if (vms.find(id1) == vms.end() || vms.find(id2) == vms.end()) return false;
+        if (id1 == id2) return false;
         db.remove_link(id1, id2);
-        unlink_taps(vms[id1].tap_name, vms[id2].tap_name);
+        if (vms.find(id1) != vms.end() && vms.find(id2) != vms.end()) {
+            unlink_taps(vms[id1].tap_name, vms[id2].tap_name);
+        }
         return true;
     }
 

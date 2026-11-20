@@ -43,6 +43,7 @@ async function fetchData() {
             updateLinkSelectors(vms);
             renderLinks(links, vms);
             renderVolumes(volumes, vms);
+            renderRoutingPermissions(vms);
             lastRenderState = currentState;
         }
     } catch (error) {
@@ -71,7 +72,7 @@ function renderTable(vms) {
             actionButtons = ``;
             if (vm.ssh_exposed) {
                 actionButtons += `
-                    <button onclick="copySSH(this, '${vm.uuid}', ${vm.host_port || 0})" class="text-xs font-medium text-blue-600 bg-blue-50 hover:bg-blue-100 px-3 py-1.5 rounded-md transition-colors border border-blue-200">
+                    <button onclick="copySSH(this, '${vm.uuid}', ${vm.host_port || 0}, '${vm.host_lan_ip || ''}')" class="text-xs font-medium text-blue-600 bg-blue-50 hover:bg-blue-100 px-3 py-1.5 rounded-md transition-colors border border-blue-200">
                         <svg class="w-3 h-3 mr-1 inline" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z"></path></svg>
                         SSH
                     </button>
@@ -130,6 +131,11 @@ function renderTable(vms) {
                     <div class="w-7 h-4 bg-slate-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-3 after:w-3 after:transition-all peer-checked:bg-green-600 relative"></div>
                     <span class="ml-2 text-[10px] font-medium text-slate-600">HTTPS (443)</span>
                 </label>
+                <label class="flex items-center cursor-pointer">
+                    <input type="checkbox" class="sr-only peer" ${vm.allow_interproject_routing ? 'checked' : ''} onchange="updateRouting('${vm.uuid}', this.checked)">
+                    <div class="w-7 h-4 bg-slate-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-3 after:w-3 after:transition-all peer-checked:bg-purple-600 relative"></div>
+                    <span class="ml-2 text-[10px] font-medium text-slate-600">Cross-Project</span>
+                </label>
             </div>
         `;
 
@@ -179,6 +185,7 @@ if (spawnForm) {
             expose_ssh: document.getElementById('expose-ssh') ? document.getElementById('expose-ssh').checked : false,
             expose_http: document.getElementById('expose-http') ? document.getElementById('expose-http').checked : false,
             expose_https: document.getElementById('expose-https') ? document.getElementById('expose-https').checked : false,
+            allow_interproject_routing: document.getElementById('allow-interproject') ? document.getElementById('allow-interproject').checked : false,
             rootfs_gb: parseInt(document.getElementById('rootfs_gb').value)
         };
 
@@ -206,13 +213,99 @@ function updateLinkSelectors(vms) {
     if (!linkVm1 || !linkVm2) return;
     const runningVMs = vms.filter(v => v.status === 'running');
     const prev1 = linkVm1.value;
+
+    const projects = {};
+    runningVMs.forEach(vm => {
+        const proj = vm.project || 'default';
+        if (!projects[proj]) projects[proj] = [];
+        projects[proj].push(vm);
+    });
+
+    let optHtml1 = '';
+    for (const proj in projects) {
+        optHtml1 += `<optgroup label="Project: ${proj}">`;
+        projects[proj].forEach(vm => {
+            const routingTag = vm.allow_interproject_routing ? ' [Inter-Project: ON]' : '';
+            optHtml1 += `<option value="${vm.uuid}">${vm.name || 'VM ' + vm.id} (${vm.ip})${routingTag}</option>`;
+        });
+        optHtml1 += `</optgroup>`;
+    }
+    linkVm1.innerHTML = optHtml1 || `<option value="" disabled selected>No running VMs available</option>`;
+    if (prev1 && runningVMs.some(v => v.uuid === prev1)) {
+        linkVm1.value = prev1;
+    }
+
+    updateDestinationSelector(vms);
+}
+
+function updateDestinationSelector(vms) {
+    if (!linkVm1 || !linkVm2) return;
+    const runningVMs = vms.filter(v => v.status === 'running');
+    const selectedSrcUuid = linkVm1.value;
+    const srcVM = runningVMs.find(v => v.uuid === selectedSrcUuid);
     const prev2 = linkVm2.value;
 
-    const options = runningVMs.map(vm => `<option value="${vm.uuid}">${vm.name || 'VM ' + vm.id} (${vm.project || 'default'} - ${vm.ip})</option>`).join('');
-    linkVm1.innerHTML = options;
-    linkVm2.innerHTML = options;
-    if (prev1) linkVm1.value = prev1;
-    if (prev2) linkVm2.value = prev2;
+    if (!srcVM) {
+        linkVm2.innerHTML = `<option value="" disabled selected>Select Source VM first</option>`;
+        return;
+    }
+
+    const sameProjectTargets = [];
+    const interProjectTargets = [];
+
+    runningVMs.forEach(targetVM => {
+        if (targetVM.uuid === srcVM.uuid) return;
+        const sameProj = (targetVM.project || 'default') === (srcVM.project || 'default');
+        if (sameProj) {
+            sameProjectTargets.push(targetVM);
+        } else if (srcVM.allow_interproject_routing && targetVM.allow_interproject_routing) {
+            interProjectTargets.push(targetVM);
+        }
+    });
+
+    let optHtml2 = '';
+    if (sameProjectTargets.length > 0) {
+        optHtml2 += `<optgroup label="Same Project (${srcVM.project || 'default'})">`;
+        sameProjectTargets.forEach(vm => {
+            optHtml2 += `<option value="${vm.uuid}">${vm.name || 'VM ' + vm.id} (${vm.ip})</option>`;
+        });
+        optHtml2 += `</optgroup>`;
+    }
+
+    if (interProjectTargets.length > 0) {
+        const interProjects = {};
+        interProjectTargets.forEach(vm => {
+            const p = vm.project || 'default';
+            if (!interProjects[p]) interProjects[p] = [];
+            interProjects[p].push(vm);
+        });
+
+        for (const p in interProjects) {
+            optHtml2 += `<optgroup label="Inter-Project Authorized (${p})">`;
+            interProjects[p].forEach(vm => {
+                optHtml2 += `<option value="${vm.uuid}">${vm.name || 'VM ' + vm.id} (${vm.ip}) [Inter-Project]</option>`;
+            });
+            optHtml2 += `</optgroup>`;
+        }
+    }
+
+    if (!optHtml2) {
+        if (!srcVM.allow_interproject_routing) {
+            optHtml2 = `<option value="" disabled selected>No eligible VMs in project "${srcVM.project || 'default'}" (enable Inter-Project Routing to bridge other projects)</option>`;
+        } else {
+            optHtml2 = `<option value="" disabled selected>No eligible destination VMs available</option>`;
+        }
+    }
+
+    linkVm2.innerHTML = optHtml2;
+    const allEligible = [...sameProjectTargets, ...interProjectTargets];
+    if (prev2 && allEligible.some(v => v.uuid === prev2)) {
+        linkVm2.value = prev2;
+    }
+}
+
+if (linkVm1) {
+    linkVm1.addEventListener('change', () => updateDestinationSelector(cachedVMs));
 }
 
 function renderLinks(links, vms) {
@@ -249,13 +342,16 @@ if (linkForm) {
             return; 
         }
         
+        const btn = document.getElementById('link-btn');
+        if (btn) { btn.disabled = true; btn.textContent = "Bridging..."; }
+
         try {
             const res = await fetch(LINKS_API_URL, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ vm1_id: vm1_uuid, vm2_id: vm2_uuid })
             });
-            const data = await res.json();
+            const data = await res.json().catch(() => ({}));
             if (!res.ok) {
                 alert("Failed to bridge VMs: " + (data.error || "Unknown error"));
             } else {
@@ -263,6 +359,8 @@ if (linkForm) {
             }
         } catch (err) {
             alert("Failed to bridge VMs: " + err.message);
+        } finally {
+            if (btn) { btn.disabled = false; btn.textContent = "Bridge Link"; }
         }
     });
 }
@@ -380,6 +478,66 @@ async function updatePorts(uuid, ssh, http, https) {
     }
 }
 
+async function updateRouting(uuid, allow) {
+    try {
+        const res = await fetch(`${API_URL}/${uuid}/routing`, {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ allow_interproject_routing: allow })
+        });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) {
+            alert("Failed to update routing permission: " + (data.error || "Unknown error"));
+        }
+        fetchData();
+    } catch (err) {
+        alert("Failed to update routing permission: " + err.message);
+    }
+}
+
+function renderRoutingPermissions(vms) {
+    const container = document.getElementById('routing-permissions-container');
+    if (!container) return;
+    if (!vms || vms.length === 0) {
+        container.innerHTML = `<p class="text-xs text-slate-400 italic">No MicroVMs available.</p>`;
+        return;
+    }
+
+    container.innerHTML = vms.map(vm => {
+        const isAllowed = !!vm.allow_interproject_routing;
+        const statusColor = vm.status === 'running' ? 'bg-green-500' : (vm.status === 'hibernated' ? 'bg-orange-500' : 'bg-slate-400');
+        const badge = isAllowed 
+            ? `<span class="inline-flex items-center px-2 py-0.5 rounded text-[10px] font-medium bg-purple-100 text-purple-800">Inter-Project Allowed</span>`
+            : `<span class="inline-flex items-center px-2 py-0.5 rounded text-[10px] font-medium bg-slate-100 text-slate-600">Isolated to Project</span>`;
+
+        return `
+            <div class="flex items-center justify-between p-3.5 bg-slate-50 border border-slate-200 rounded-lg">
+                <div class="flex items-center space-x-3">
+                    <span class="w-2 h-2 rounded-full ${statusColor}"></span>
+                    <div>
+                        <div class="flex items-center space-x-2">
+                            <span class="text-sm font-semibold text-slate-800">${vm.name || 'VM ' + vm.id}</span>
+                            <span class="text-xs text-slate-500 font-mono">(${vm.ip})</span>
+                            ${badge}
+                        </div>
+                        <div class="text-xs text-slate-500 mt-0.5">
+                            <span class="font-medium text-slate-600">Project:</span> ${vm.project || 'default'} &bull;
+                            <span class="font-mono text-[11px] text-slate-400">${vm.uuid}</span>
+                        </div>
+                    </div>
+                </div>
+                <div class="flex items-center space-x-3">
+                    <label class="flex items-center cursor-pointer">
+                        <input type="checkbox" class="sr-only peer" ${isAllowed ? 'checked' : ''} onchange="updateRouting('${vm.uuid}', this.checked)">
+                        <div class="w-9 h-5 bg-slate-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-purple-600 relative"></div>
+                        <span class="ml-2.5 text-xs font-medium text-slate-700">Allow Cross-Project</span>
+                    </label>
+                </div>
+            </div>
+        `;
+    }).join('');
+}
+
 async function deleteVM(uuid) { 
     if (confirm("Permanently delete this microVM and free disk resources?")) { 
         const res = await fetch(`${API_URL}/${uuid}`, {method:'DELETE'}); 
@@ -421,12 +579,16 @@ async function wakeVM(uuid) {
 }
 
 async function unlinkVMs(vm1, vm2) { 
-    const res = await fetch(`${LINKS_API_URL}/${vm1}/${vm2}`, {method:'DELETE'}); 
-    if (!res.ok) {
-        const data = await res.json().catch(() => ({}));
-        alert("Failed to unlink VMs: " + (data.error || "Unknown error"));
+    try {
+        const res = await fetch(`${LINKS_API_URL}/${vm1}/${vm2}`, {method:'DELETE'}); 
+        if (!res.ok) {
+            const data = await res.json().catch(() => ({}));
+            alert("Failed to unlink VMs: " + (data.error || "Unknown error"));
+        }
+        fetchData(); 
+    } catch (err) {
+        alert("Failed to unlink VMs: " + err.message);
     }
-    fetchData(); 
 }
 
 async function deleteVolume(id) { 
@@ -472,16 +634,93 @@ async function detachVolume(vol_id) {
     }
 }
 
-function copySSH(btn, uuid, hostPort) {
+async function copyTextToClipboard(text) {
+    if (navigator.clipboard && window.isSecureContext) {
+        try {
+            await navigator.clipboard.writeText(text);
+            return true;
+        } catch (err) {
+            console.warn("navigator.clipboard write failed:", err);
+        }
+    }
+
+    try {
+        const textArea = document.createElement("textarea");
+        textArea.value = text;
+        textArea.style.top = "0";
+        textArea.style.left = "0";
+        textArea.style.position = "fixed";
+        textArea.style.opacity = "0";
+        textArea.setAttribute("readonly", "");
+        document.body.appendChild(textArea);
+        textArea.focus();
+        textArea.select();
+        textArea.setSelectionRange(0, 99999);
+        const successful = document.execCommand("copy");
+        document.body.removeChild(textArea);
+        if (successful) return true;
+    } catch (err) {
+        console.warn("execCommand fallback failed:", err);
+    }
+
+    return false;
+}
+
+function showSSHModal(cmd) {
+    const modal = document.getElementById('ssh-modal');
+    const input = document.getElementById('ssh-modal-input');
+    if (modal && input) {
+        input.value = cmd;
+        modal.classList.remove('hidden');
+        input.focus();
+        input.select();
+    } else {
+        window.prompt("SSH Command (Ctrl+C / tap to copy):", cmd);
+    }
+}
+
+function closeSSHModal() {
+    const modal = document.getElementById('ssh-modal');
+    if (modal) modal.classList.add('hidden');
+}
+
+async function copyFromModal() {
+    const input = document.getElementById('ssh-modal-input');
+    const btn = document.getElementById('ssh-modal-copy-btn');
+    if (!input) return;
+    const ok = await copyTextToClipboard(input.value);
+    if (btn) {
+        const orig = btn.textContent;
+        btn.textContent = ok ? "Copied!" : "Selected";
+        btn.classList.replace('bg-blue-600', 'bg-green-600');
+        setTimeout(() => {
+            btn.textContent = orig;
+            btn.classList.replace('bg-green-600', 'bg-blue-600');
+        }, 2000);
+    }
+}
+
+async function copySSH(btn, uuid, hostPort, hostLanIp) {
     const hex = uuid.startsWith('vm-') ? uuid.substring(3) : uuid;
+
+    let targetHost = "localhost";
+    const currentHost = window.location.hostname;
+    if (currentHost && currentHost !== "localhost" && currentHost !== "127.0.0.1") {
+        targetHost = currentHost;
+    } else if (hostLanIp && hostLanIp !== "127.0.0.1") {
+        targetHost = hostLanIp;
+    }
+
     let cmd = "";
     if (hostPort && parseInt(hostPort) > 0) {
-        cmd = `ssh -p ${hostPort} root@localhost`;
+        cmd = `ssh -p ${hostPort} root@${targetHost}`;
     } else {
         cmd = `ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ProxyCommand="nc -U /tmp/cryo-${hex}_22.sock" root@localhost`;
     }
 
-    navigator.clipboard.writeText(cmd).then(() => {
+    const copied = await copyTextToClipboard(cmd);
+
+    if (copied) {
         const originalHtml = btn.innerHTML;
         btn.innerHTML = `<svg class="w-3 h-3 mr-1 inline" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"></path></svg> Copied!`;
         btn.classList.replace('text-blue-600', 'text-green-600');
@@ -493,7 +732,9 @@ function copySSH(btn, uuid, hostPort) {
             btn.classList.replace('bg-green-50', 'bg-blue-50');
             btn.classList.replace('border-green-200', 'border-blue-200');
         }, 2000);
-    });
+    } else {
+        showSSHModal(cmd);
+    }
 }
 
 fetchData();

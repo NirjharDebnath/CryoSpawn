@@ -81,5 +81,76 @@ class FrontendAuthTestCase(unittest.TestCase):
         res = client2.post('/api/auth/login', json={'username': 'alice', 'password': 'newpassword123'})
         self.assertEqual(res.status_code, 200)
 
+    def test_08_authenticated_session_me(self):
+        client = app.test_client()
+        client.post('/api/auth/login', json={'username': 'alice', 'password': 'newpassword123'})
+        res = client.get('/api/auth/me')
+        self.assertEqual(res.status_code, 200)
+        self.assertEqual(res.json.get('username'), 'alice')
+        self.assertEqual(res.json.get('role'), 'user')
+        self.assertIsInstance(res.json.get('user_id'), int)
+
+    def test_09_proxy_header_injection_and_anti_spoofing(self):
+        from unittest.mock import patch, MagicMock
+
+        client = app.test_client()
+        # Login alice (user role)
+        client.post('/api/auth/login', json={'username': 'alice', 'password': 'newpassword123'})
+        me_res = client.get('/api/auth/me')
+        alice_id = me_res.json['user_id']
+
+        # Mock requests.request to intercept outgoing call to C++ backend
+        with patch('frontend.app.requests.request') as mock_req:
+            mock_resp = MagicMock()
+            mock_resp.status_code = 200
+            mock_resp.content = b'[]'
+            mock_resp.headers = {}
+            mock_req.return_value = mock_resp
+
+            # User attempts to spoof admin role and different user id
+            client.get('/api/vms', headers={'X-User-ID': '999', 'X-Role': 'admin'})
+
+            self.assertTrue(mock_req.called)
+            called_headers = mock_req.call_args[1]['headers']
+
+            # Must have alice's trusted credentials, NOT spoofed headers
+            self.assertEqual(called_headers['X-User-ID'], str(alice_id))
+            self.assertEqual(called_headers['X-Role'], 'user')
+
+    def test_10_proxy_multitenant_routing_and_volumes_methods(self):
+        from unittest.mock import patch, MagicMock
+
+        client = app.test_client()
+        client.post('/api/auth/login', json={'username': 'alice', 'password': 'newpassword123'})
+        me_res = client.get('/api/auth/me')
+        alice_id = str(me_res.json['user_id'])
+
+        with patch('frontend.app.requests.request') as mock_req:
+            mock_resp = MagicMock()
+            mock_resp.status_code = 200
+            mock_resp.content = b'{"status":"ok"}'
+            mock_resp.headers = {}
+            mock_req.return_value = mock_resp
+
+            # POST /api/links
+            client.post('/api/links', json={'vm1_id': 'vm-1', 'vm2_id': 'vm-2'}, headers={'X-User-ID': '1', 'X-Role': 'admin'})
+            self.assertEqual(mock_req.call_args[1]['headers']['X-User-ID'], alice_id)
+            self.assertEqual(mock_req.call_args[1]['headers']['X-Role'], 'user')
+
+            # PATCH /api/vms/vm-1/routing
+            client.patch('/api/vms/vm-1/routing', json={'allow_interproject_routing': True}, headers={'X-User-ID': '1', 'X-Role': 'admin'})
+            self.assertEqual(mock_req.call_args[1]['headers']['X-User-ID'], alice_id)
+            self.assertEqual(mock_req.call_args[1]['headers']['X-Role'], 'user')
+
+            # DELETE /api/vms/vm-1
+            client.delete('/api/vms/vm-1', headers={'X-User-ID': '1', 'X-Role': 'admin'})
+            self.assertEqual(mock_req.call_args[1]['headers']['X-User-ID'], alice_id)
+            self.assertEqual(mock_req.call_args[1]['headers']['X-Role'], 'user')
+
+            # GET /api/volumes
+            client.get('/api/volumes', headers={'X-User-ID': '1', 'X-Role': 'admin'})
+            self.assertEqual(mock_req.call_args[1]['headers']['X-User-ID'], alice_id)
+            self.assertEqual(mock_req.call_args[1]['headers']['X-Role'], 'user')
+
 if __name__ == '__main__':
     unittest.main()

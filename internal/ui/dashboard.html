@@ -93,6 +93,11 @@
                         <div class="w-9 h-5 bg-slate-200 peer-focus:outline-none peer-focus:ring-2 peer-focus:ring-green-500 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-green-600 relative"></div>
                         <span class="ml-3 text-sm font-medium text-slate-700">Enable HTTPS (Port 443)</span>
                     </label>
+                    <label class="flex items-center cursor-pointer">
+                        <input type="checkbox" id="allow-interproject" class="sr-only peer">
+                        <div class="w-9 h-5 bg-slate-200 peer-focus:outline-none peer-focus:ring-2 peer-focus:ring-purple-500 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-purple-600 relative"></div>
+                        <span class="ml-3 text-sm font-medium text-slate-700">Allow Inter-Project Routing</span>
+                    </label>
                 </div>
                 <button type="submit" id="spawn-btn" class="w-full bg-blue-600 text-white font-medium py-2 px-4 rounded-md hover:bg-blue-700 transition-colors">
                     Deploy MicroVM
@@ -130,6 +135,35 @@
 
         </div>
     </main>
+
+    <!-- SSH Connection Modal (Mobile & LAN friendly) -->
+    <div id="ssh-modal" class="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50 flex items-center justify-center hidden p-4">
+        <div class="bg-white rounded-xl shadow-xl border border-slate-200 max-w-lg w-full p-6 space-y-4">
+            <div class="flex items-center justify-between pb-2 border-b border-slate-100">
+                <h3 class="text-base font-bold text-slate-800 flex items-center gap-2">
+                    <span>💻</span> SSH Connection Info
+                </h3>
+                <button onclick="closeSSHModal()" class="text-slate-400 hover:text-slate-600 text-xl font-bold leading-none">&times;</button>
+            </div>
+            <div>
+                <label class="block text-xs font-medium text-slate-600 mb-1">SSH Terminal Command</label>
+                <div class="flex items-center gap-2">
+                    <input type="text" id="ssh-modal-input" readonly class="flex-1 font-mono text-xs bg-slate-50 border border-slate-300 rounded-lg px-3 py-2 text-slate-800 select-all focus:outline-none focus:ring-2 focus:ring-blue-500">
+                    <button id="ssh-modal-copy-btn" onclick="copyFromModal()" class="bg-blue-600 hover:bg-blue-700 text-white text-xs font-medium px-4 py-2 rounded-lg transition-colors whitespace-nowrap">
+                        Copy
+                    </button>
+                </div>
+                <p class="text-[11px] text-slate-500 mt-2">
+                    Tap the command to select, or press Copy. Accessible across your local Wi-Fi/LAN network.
+                </p>
+            </div>
+            <div class="flex justify-end pt-2">
+                <button onclick="closeSSHModal()" class="text-xs bg-slate-100 hover:bg-slate-200 text-slate-700 font-medium px-4 py-2 rounded-lg transition-colors">
+                    Close
+                </button>
+            </div>
+        </div>
+    </div>
 
     <script>
         async function fetchUser() {
