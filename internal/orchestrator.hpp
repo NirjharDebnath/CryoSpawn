@@ -62,13 +62,16 @@ private:
         return id;
     }
 
-    std::string generate_mac(int slot) {
-        std::stringstream ss;
-        ss << "AA:FC:AC:10:" << std::setfill('0') << std::setw(2) << std::hex << (slot / 256) << ":" << std::setfill('0') << std::setw(2) << std::hex << (slot % 256);
-        return ss.str();
+public:
+    static std::string generate_mac(int slot) {
+        int base = slot * 4;
+        int octet3 = (base / 256) & 0xFF;
+        int octet4 = ((base % 256) + 2) & 0xFF;
+        char buf[32];
+        std::snprintf(buf, sizeof(buf), "06:00:AC:10:%02X:%02X", octet3, octet4);
+        return std::string(buf);
     }
 
-public:
     Database db;
     std::unordered_set<std::string> active_uuids;
     std::string active_iface;
@@ -116,11 +119,14 @@ public:
             if (link.vm1_id == vm.id && vms.count(link.vm2_id)) unlink_taps(vm.tap_name, vms[link.vm2_id].tap_name);
             if (link.vm2_id == vm.id && vms.count(link.vm1_id)) unlink_taps(vm.tap_name, vms[link.vm1_id].tap_name);
         }
-        teardown_cryo_network(vm.tap_name);
+        teardown_cryo_network(vm.tap_name, active_iface);
         if (vm.ssh_exposed && vm.host_port > 0) {
             unexpose_vm_port(active_iface, vm.host_port, vm.ip, 22);
         }
         unlink(vm.socket_path.c_str());
+
+        // Detach any attached volumes so they are not orphaned
+        db.detach_all_volumes_from_vm(vm.id);
 
         // Delete unique rootfs disk and snapshots
         std::string base_dir = config::BASE_PATH + "/instances";
@@ -151,6 +157,7 @@ public:
 
     void reconcile_state() {
         std::cout << "[*] Reconciling state from database...\n";
+        std::unordered_set<std::string> active_taps;
         auto records = db.get_all_vms();
         for (const auto& r : records) {
             MicroVM vm;
@@ -173,6 +180,10 @@ public:
             vm.name = r.name;
             vm.owner_id = r.owner_id;
             vm.allow_interproject_routing = r.allow_interproject_routing;
+            vm.mac = r.mac.empty() ? generate_mac(r.slot) : r.mac;
+            if (r.mac.empty()) {
+                db.update_mac(vm.id, vm.mac);
+            }
 
             if (vm.uuid.empty()) {
                 vm.uuid = generate_vm_id();
@@ -191,13 +202,16 @@ public:
                 active_uuids.insert(vm.uuid);
                 vms[r.slot] = vm; 
                 pid_to_slot[r.pid] = r.slot;
+                active_taps.insert(vm.tap_name);
                 std::cout << "[+] Adopted running VM " << r.slot << " (PID " << r.pid << ")\n";
             } else {
                 std::cout << "[-] Cleaning up stale DB entry for unrecoverable VM " << r.slot << "\n";
                 cleanup_vm_resources(vm);
             }
         }
+        db.cleanup_orphaned_volumes();
         db.cleanup_orphaned_links();
+        cleanup_orphaned_taps(active_taps);
     }
 
     void start_reaper() {
@@ -226,8 +240,8 @@ public:
                     }
                 }
 
-                // Check for adopted processes that exited
-                std::vector<int> dead_adopted;
+                // Check for adopted processes or externally killed processes that exited
+                std::vector<int> dead_slots;
                 {
                     std::lock_guard<std::mutex> lock(mtx);
                     for (auto& pair : vms) {
@@ -235,22 +249,21 @@ public:
                         if (st == "hibernated" || st == "stopped" || st == "restarting" || st == "booting" || st == "waking") {
                             continue;
                         }
-                        if (pid_to_slot.find(pair.second.pid) == pid_to_slot.end()) {
-                            if (pair.second.pid > 0 && kill(pair.second.pid, 0) != 0) {
-                                dead_adopted.push_back(pair.first);
-                            }
+                        if (pair.second.pid > 0 && kill(pair.second.pid, 0) != 0) {
+                            dead_slots.push_back(pair.first);
                         }
                     }
                 }
-                for (int slot : dead_adopted) {
+                for (int slot : dead_slots) {
                     std::lock_guard<std::mutex> lock(mtx);
                     if (vms.find(slot) != vms.end()) {
+                        pid_to_slot.erase(vms[slot].pid);
                         cleanup_vm_resources(vms[slot]);
                         active_uuids.erase(vms[slot].uuid);
                         vms.erase(slot);
                     }
                 }
-                std::this_thread::sleep_for(std::chrono::seconds(2));
+                std::this_thread::sleep_for(std::chrono::seconds(1));
             }
         }).detach();
     }
@@ -313,7 +326,7 @@ public:
         vm.pid = pid;
         vms[vm.id] = vm;
         pid_to_slot[pid] = vm.id;
-        db.insert_vm(slot, pid, "booting", vcpus, mem_mib, vm.ip, vm.host_ip, vm.tap_name, expose_ssh, vm.host_port, vm.project_name, expose_http, expose_https, vm.rootfs_gb, vm.uuid, vm.name, owner_id, allow_interproject_routing);
+        db.insert_vm(slot, pid, "booting", vcpus, mem_mib, vm.ip, vm.host_ip, vm.tap_name, expose_ssh, vm.host_port, vm.project_name, expose_http, expose_https, vm.rootfs_gb, vm.uuid, vm.name, owner_id, allow_interproject_routing, vm.mac);
         return vm;
     }
 
@@ -323,6 +336,10 @@ public:
         {
             std::lock_guard<std::mutex> lock(mtx);
             if (vms.find(id) == vms.end()) return false;
+            if (vms[id].mac.empty()) {
+                vms[id].mac = generate_mac(id);
+                db.update_mac(id, vms[id].mac);
+            }
             vm = vms[id];
         }
 
@@ -395,26 +412,38 @@ public:
 
     bool reboot_vm(int id, const std::string& kernel, const std::string& rootfs) {
         MicroVM old_vm;
+        pid_t old_pid = 0;
         {
             std::lock_guard<std::mutex> lock(mtx);
             if (vms.find(id) == vms.end()) return false;
             if (vms[id].status == "terminating") return false;
-            if (vms[id].pid > 0) {
+            old_pid = vms[id].pid;
+            if (old_pid > 0) {
                 vms[id].status = "restarting";
-                kill(vms[id].pid, SIGKILL);
+                kill(old_pid, SIGKILL);
             }
             old_vm = vms[id];
+            if (old_vm.mac.empty()) {
+                old_vm.mac = generate_mac(id);
+                vms[id].mac = old_vm.mac;
+                db.update_mac(id, old_vm.mac);
+            }
         }
 
-        // Wait for process to exit and reaper to acknowledge
-        for (int i = 0; i < 50; ++i) {
-            bool dead = false;
-            {
-                std::lock_guard<std::mutex> lock(mtx);
-                if (vms.find(id) == vms.end() || vms[id].pid == 0) dead = true;
+        // Wait for old process to exit (reap if child, or check exit if adopted)
+        if (old_pid > 0) {
+            for (int i = 0; i < 30; ++i) {
+                int status;
+                if (waitpid(old_pid, &status, WNOHANG) > 0 || kill(old_pid, 0) != 0) {
+                    break;
+                }
+                std::this_thread::sleep_for(std::chrono::milliseconds(10));
             }
-            if (dead) break;
-            std::this_thread::sleep_for(std::chrono::milliseconds(100));
+            std::lock_guard<std::mutex> lock(mtx);
+            pid_to_slot.erase(old_pid);
+            if (vms.find(id) != vms.end()) {
+                vms[id].pid = 0;
+            }
         }
 
         // Respawn Firecracker reusing TAP and Rootfs
@@ -449,13 +478,22 @@ public:
         if (vms.find(id) == vms.end()) return;
         
         vms[id].status = "terminating";
-        if (vms[id].pid > 0) {
-            kill(vms[id].pid, SIGKILL);
-        } else {
-            cleanup_vm_resources(vms[id]);
-            active_uuids.erase(vms[id].uuid);
-            vms.erase(id);
+        db.update_status(id, "terminating");
+        pid_t pid = vms[id].pid;
+        if (pid > 0) {
+            kill(pid, SIGKILL);
+            for (int i = 0; i < 25; ++i) {
+                int status;
+                if (waitpid(pid, &status, WNOHANG) > 0 || kill(pid, 0) != 0) {
+                    break;
+                }
+                std::this_thread::sleep_for(std::chrono::milliseconds(10));
+            }
+            pid_to_slot.erase(pid);
         }
+        cleanup_vm_resources(vms[id]);
+        active_uuids.erase(vms[id].uuid);
+        vms.erase(id);
     }
 
     bool hibernate_vm(int id) {
@@ -727,7 +765,7 @@ public:
         std::lock_guard<std::mutex> lock(mtx);
         vms[vm.id] = vm;
         active_uuids.insert(vm.uuid);
-        db.insert_vm(vm.id, vm.pid, vm.status, vm.vcpus, vm.mem_mib, vm.ip, vm.host_ip, vm.tap_name, vm.ssh_exposed, vm.host_port, vm.project_name, vm.http_exposed, vm.https_exposed, vm.rootfs_gb, vm.uuid, vm.name, vm.owner_id, vm.allow_interproject_routing);
+        db.insert_vm(vm.id, vm.pid, vm.status, vm.vcpus, vm.mem_mib, vm.ip, vm.host_ip, vm.tap_name, vm.ssh_exposed, vm.host_port, vm.project_name, vm.http_exposed, vm.https_exposed, vm.rootfs_gb, vm.uuid, vm.name, vm.owner_id, vm.allow_interproject_routing, vm.mac);
     }
 
     bool unlink_microvms(int id1, int id2) {

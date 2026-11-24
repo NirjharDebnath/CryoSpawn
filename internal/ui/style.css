@@ -1,3 +1,297 @@
+/* ==========================================================================
+   CryoSpawn — Crisp Alpine Daylight & Cold Wind Weather Theme
+   Bright snow-white & pale-ice frosted glass surfaces, crisp frost borders,
+   deep fjord-blue accents, high-contrast typography, and smooth CSS wind/snow.
+   ========================================================================== */
+
+:root {
+    --alpine-sky-top: #f7fbff;
+    --alpine-sky-mid: #eaf4fc;
+    --alpine-sky-low: #dcecf9;
+    --alpine-ice-tint: rgba(235, 246, 255, 0.72);
+    --alpine-snow-glass: rgba(255, 255, 255, 0.80);
+    --alpine-snow-strong: rgba(255, 255, 255, 0.92);
+    --alpine-frost-border: rgba(168, 207, 238, 0.78);
+    --alpine-frost-border-strong: rgba(125, 182, 226, 0.90);
+    --alpine-fjord: #0b4f7c;
+    --alpine-fjord-hover: #083b5c;
+    --alpine-fjord-bright: #0e6ba8;
+    --alpine-fjord-soft: rgba(14, 107, 168, 0.10);
+    --alpine-ink: #0c2238;
+    --alpine-ink-body: #1e3a52;
+    --alpine-ink-muted: #486581;
+}
+
+html, body {
+    color: var(--alpine-ink);
+}
+
+/* Crisp Alpine Daylight Canvas */
+.alpine-daylight {
+    background-color: #ebf4fc;
+    background-image:
+        radial-gradient(circle at 86% 6%, rgba(255, 255, 255, 0.96) 0%, rgba(226, 242, 255, 0.52) 34%, transparent 64%),
+        radial-gradient(circle at 12% 18%, rgba(212, 235, 253, 0.65) 0%, transparent 50%),
+        linear-gradient(155deg, #f9fcff 0%, #ebf4fc 42%, #ddecf9 76%, #edf6fd 100%);
+    background-attachment: fixed;
+    color: var(--alpine-ink);
+    position: relative;
+}
+
+/* Subtle Alpine Ridge Horizon Silhouette (non-blocking) */
+.alpine-horizon {
+    position: fixed;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    height: 170px;
+    pointer-events: none;
+    z-index: 0;
+    opacity: 0.55;
+    background:
+        linear-gradient(168deg, transparent 48%, rgba(203, 227, 248, 0.55) 48.5%, rgba(229, 242, 253, 0.25) 100%),
+        linear-gradient(193deg, transparent 54%, rgba(189, 219, 245, 0.50) 54.5%, rgba(235, 246, 255, 0.15) 100%),
+        linear-gradient(176deg, transparent 62%, rgba(255, 255, 255, 0.72) 62.5%, rgba(240, 248, 255, 0.45) 100%);
+}
+
+/* Weather Atmosphere Layer: Cold Wind Streaks + Gentle Snow Drift */
+.alpine-weather-layer {
+    position: fixed;
+    inset: 0;
+    pointer-events: none;
+    overflow: hidden;
+    z-index: 1;
+}
+
+.alpine-shell {
+    position: relative;
+    z-index: 10;
+}
+
+/* Animated Cold Wind Streaks */
+.wind-streak {
+    position: absolute;
+    left: -35%;
+    border-radius: 9999px;
+    background: linear-gradient(
+        90deg,
+        rgba(255, 255, 255, 0) 0%,
+        rgba(255, 255, 255, 0.88) 38%,
+        rgba(176, 221, 252, 0.72) 68%,
+        rgba(255, 255, 255, 0) 100%
+    );
+    filter: blur(0.4px);
+    opacity: 0;
+    transform: translate3d(0, 0, 0) rotate(-3.5deg);
+    animation: alpine-wind-gust var(--wind-duration, 9s) linear infinite;
+    animation-delay: var(--wind-delay, 0s);
+    will-change: transform, opacity;
+}
+
+.wind-streak--1 { top: 11%; width: 320px; height: 2px; --wind-duration: 7.5s; --wind-delay: -1.2s; }
+.wind-streak--2 { top: 24%; width: 420px; height: 1.5px; --wind-duration: 9.8s; --wind-delay: -4.6s; }
+.wind-streak--3 { top: 41%; width: 280px; height: 2px; --wind-duration: 8.2s; --wind-delay: -2.8s; }
+.wind-streak--4 { top: 58%; width: 460px; height: 1.5px; --wind-duration: 10.6s; --wind-delay: -6.1s; }
+.wind-streak--5 { top: 73%; width: 350px; height: 2px; --wind-duration: 8.9s; --wind-delay: -0.9s; }
+.wind-streak--6 { top: 86%; width: 390px; height: 1.5px; --wind-duration: 11.4s; --wind-delay: -5.3s; }
+
+@keyframes alpine-wind-gust {
+    0% {
+        transform: translate3d(-10vw, 0px, 0) rotate(-3.5deg);
+        opacity: 0;
+    }
+    12% {
+        opacity: 0.72;
+    }
+    55% {
+        opacity: 0.55;
+    }
+    88% {
+        opacity: 0.35;
+    }
+    100% {
+        transform: translate3d(145vw, 24px, 0) rotate(-3.5deg);
+        opacity: 0;
+    }
+}
+
+/* Gentle Snow Drift Motes */
+.snow-mote {
+    position: absolute;
+    top: -16px;
+    border-radius: 9999px;
+    background: radial-gradient(circle, rgba(255, 255, 255, 0.98) 0%, rgba(221, 240, 255, 0.78) 65%, rgba(255, 255, 255, 0) 100%);
+    box-shadow: 0 0 8px rgba(173, 216, 250, 0.55);
+    opacity: 0;
+    animation: alpine-snow-drift var(--snow-duration, 14s) linear infinite;
+    animation-delay: var(--snow-delay, 0s);
+    will-change: transform, opacity;
+}
+
+.snow-mote--1  { left: 6%;  width: 6px; height: 6px; --snow-duration: 12s; --snow-delay: -2s; }
+.snow-mote--2  { left: 14%; width: 4px; height: 4px; --snow-duration: 15s; --snow-delay: -7s; }
+.snow-mote--3  { left: 23%; width: 7px; height: 7px; --snow-duration: 13s; --snow-delay: -4s; }
+.snow-mote--4  { left: 32%; width: 5px; height: 5px; --snow-duration: 16s; --snow-delay: -10s; }
+.snow-mote--5  { left: 41%; width: 4px; height: 4px; --snow-duration: 11.5s; --snow-delay: -1s; }
+.snow-mote--6  { left: 50%; width: 6px; height: 6px; --snow-duration: 14.5s; --snow-delay: -8.5s; }
+.snow-mote--7  { left: 59%; width: 5px; height: 5px; --snow-duration: 13.5s; --snow-delay: -5.5s; }
+.snow-mote--8  { left: 68%; width: 7px; height: 7px; --snow-duration: 17s; --snow-delay: -11s; }
+.snow-mote--9  { left: 76%; width: 4px; height: 4px; --snow-duration: 12.5s; --snow-delay: -3.5s; }
+.snow-mote--10 { left: 84%; width: 6px; height: 6px; --snow-duration: 15.5s; --snow-delay: -9s; }
+.snow-mote--11 { left: 92%; width: 5px; height: 5px; --snow-duration: 14s; --snow-delay: -6s; }
+.snow-mote--12 { left: 28%; width: 4px; height: 4px; --snow-duration: 18s; --snow-delay: -13s; }
+
+@keyframes alpine-snow-drift {
+    0% {
+        transform: translate3d(-20px, -2vh, 0) scale(0.9);
+        opacity: 0;
+    }
+    10% {
+        opacity: 0.85;
+    }
+    50% {
+        transform: translate3d(55px, 52vh, 0) scale(1);
+        opacity: 0.78;
+    }
+    90% {
+        opacity: 0.55;
+    }
+    100% {
+        transform: translate3d(115px, 104vh, 0) scale(0.85);
+        opacity: 0;
+    }
+}
+
+/* Frosted Glass Surfaces & Frost Borders */
+.alpine-sidebar {
+    background: linear-gradient(180deg, rgba(246, 251, 255, 0.90) 0%, rgba(227, 241, 253, 0.86) 100%);
+    backdrop-filter: blur(18px) saturate(145%);
+    -webkit-backdrop-filter: blur(18px) saturate(145%);
+    border-right: 1px solid var(--alpine-frost-border);
+    box-shadow: 4px 0 24px -12px rgba(11, 79, 124, 0.14);
+}
+
+.alpine-mobile-header {
+    background: rgba(248, 252, 255, 0.88);
+    backdrop-filter: blur(14px) saturate(140%);
+    -webkit-backdrop-filter: blur(14px) saturate(140%);
+    border-bottom: 1px solid var(--alpine-frost-border);
+}
+
+.alpine-card {
+    background: linear-gradient(145deg, rgba(255, 255, 255, 0.86) 0%, rgba(240, 248, 255, 0.76) 100%);
+    backdrop-filter: blur(14px) saturate(140%);
+    -webkit-backdrop-filter: blur(14px) saturate(140%);
+    border: 1px solid var(--alpine-frost-border);
+    box-shadow:
+        0 12px 32px -12px rgba(11, 79, 124, 0.12),
+        inset 0 1px 0 rgba(255, 255, 255, 0.95);
+}
+
+.alpine-card-header {
+    background: linear-gradient(180deg, rgba(244, 250, 255, 0.90) 0%, rgba(232, 244, 254, 0.72) 100%);
+    border-bottom: 1px solid rgba(180, 214, 242, 0.72);
+}
+
+.alpine-project-card {
+    background: linear-gradient(145deg, rgba(255, 255, 255, 0.88) 0%, rgba(235, 246, 255, 0.78) 100%);
+    backdrop-filter: blur(12px) saturate(135%);
+    -webkit-backdrop-filter: blur(12px) saturate(135%);
+    border: 1px solid var(--alpine-frost-border);
+    box-shadow:
+        0 8px 24px -10px rgba(11, 79, 124, 0.10),
+        inset 0 1px 0 rgba(255, 255, 255, 0.95);
+    transition: transform 0.18s ease, box-shadow 0.18s ease, border-color 0.18s ease, background 0.18s ease;
+}
+
+.alpine-project-card:hover {
+    transform: translateY(-2px);
+    border-color: var(--alpine-fjord-bright);
+    background: linear-gradient(145deg, rgba(255, 255, 255, 0.96) 0%, rgba(230, 244, 255, 0.90) 100%);
+    box-shadow:
+        0 16px 34px -12px rgba(11, 79, 124, 0.22),
+        inset 0 1px 0 rgba(255, 255, 255, 1);
+}
+
+.alpine-subcard {
+    background: rgba(247, 251, 255, 0.82);
+    border: 1px solid rgba(186, 218, 245, 0.72);
+}
+
+/* Deep Fjord-Blue Interactive Accents */
+.alpine-nav-active {
+    background: linear-gradient(135deg, #0b4f7c 0%, #0e6ba8 100%);
+    color: #ffffff !important;
+    box-shadow: 0 6px 16px -4px rgba(11, 79, 124, 0.36);
+}
+
+.alpine-nav-item {
+    color: #1e3a52;
+    transition: background-color 0.15s ease, color 0.15s ease;
+}
+
+.alpine-nav-item:hover {
+    background: rgba(14, 107, 168, 0.10);
+    color: #0b4f7c;
+}
+
+.alpine-btn-primary {
+    background: linear-gradient(135deg, #0b4f7c 0%, #0e6ba8 100%);
+    color: #ffffff;
+    border: 1px solid rgba(8, 59, 92, 0.25);
+    box-shadow: 0 6px 16px -6px rgba(11, 79, 124, 0.45), inset 0 1px 0 rgba(255, 255, 255, 0.22);
+    transition: background 0.15s ease, transform 0.1s ease, box-shadow 0.15s ease;
+}
+
+.alpine-btn-primary:hover:not(:disabled) {
+    background: linear-gradient(135deg, #083b5c 0%, #0b588c 100%);
+    box-shadow: 0 8px 20px -6px rgba(8, 59, 92, 0.52), inset 0 1px 0 rgba(255, 255, 255, 0.25);
+}
+
+.alpine-btn-primary:disabled {
+    opacity: 0.65;
+    cursor: not-allowed;
+}
+
+.alpine-btn-success {
+    background: linear-gradient(135deg, #059669 0%, #10b981 100%) !important;
+    color: #ffffff !important;
+    border-color: rgba(5, 150, 105, 0.45) !important;
+}
+
+.alpine-btn-ghost {
+    background: rgba(255, 255, 255, 0.75);
+    color: #0b4f7c;
+    border: 1px solid rgba(154, 198, 234, 0.85);
+    transition: background 0.15s ease, border-color 0.15s ease;
+}
+
+.alpine-btn-ghost:hover {
+    background: rgba(232, 244, 254, 0.95);
+    border-color: #0e6ba8;
+}
+
+.alpine-input {
+    background: rgba(255, 255, 255, 0.90);
+    border: 1px solid rgba(164, 204, 236, 0.88);
+    color: #0c2238;
+    transition: border-color 0.15s ease, box-shadow 0.15s ease, background 0.15s ease;
+}
+
+.alpine-input:focus {
+    outline: none;
+    background: #ffffff;
+    border-color: #0e6ba8;
+    box-shadow: 0 0 0 3px rgba(14, 107, 168, 0.18);
+}
+
+.alpine-input[readonly] {
+    background: rgba(235, 245, 253, 0.88);
+    color: #0b4f7c;
+    font-weight: 600;
+    cursor: default;
+}
+
 /* Custom smooth pulsing for booting VMs */
 @keyframes soft-pulse {
     0%, 100% { opacity: 1; }
@@ -17,4 +311,17 @@ input[type="number"]::-webkit-outer-spin-button {
 input[type="number"] {
     appearance: textfield;
     -moz-appearance: textfield;
+}
+
+/* Respect user reduced-motion preferences */
+@media (prefers-reduced-motion: reduce) {
+    .wind-streak,
+    .snow-mote,
+    .status-booting {
+        animation: none !important;
+    }
+    .wind-streak {
+        opacity: 0.22;
+        transform: translate3d(20vw, 0, 0) rotate(-3.5deg);
+    }
 }

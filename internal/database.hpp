@@ -61,7 +61,8 @@ public:
                 rootfs_gb INTEGER DEFAULT 3,
                 uuid TEXT,
                 name TEXT,
-                allow_interproject_routing INTEGER DEFAULT 0
+                allow_interproject_routing INTEGER DEFAULT 0,
+                mac TEXT
             );
             CREATE TABLE IF NOT EXISTS network_links (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -92,6 +93,7 @@ public:
         try { execute_query("ALTER TABLE vms ADD COLUMN uuid TEXT;"); } catch(...) {}
         try { execute_query("ALTER TABLE vms ADD COLUMN name TEXT;"); } catch(...) {}
         try { execute_query("ALTER TABLE vms ADD COLUMN allow_interproject_routing INTEGER DEFAULT 0;"); } catch(...) {}
+        try { execute_query("ALTER TABLE vms ADD COLUMN mac TEXT;"); } catch(...) {}
     }
 
     ~Database() { if (db) sqlite3_close(db); }
@@ -105,13 +107,14 @@ public:
         std::string socket_path; std::string project_name; int rootfs_gb;
         std::string uuid; std::string name;
         bool allow_interproject_routing = false;
+        std::string mac = "";
     };
 
     struct LinkRow { int vm1_id; int vm2_id; };
 
     std::vector<DBRow> get_all_vms(int user_id = 1, bool is_admin = true) {
         std::vector<DBRow> rows;
-        const char* sql = "SELECT slot_id, pid, status, vcpus, mem_mib, guest_ip, host_ip, tap_name, ssh_exposed, host_port, project_name, http_exposed, https_exposed, rootfs_gb, uuid, name, owner_id, allow_interproject_routing FROM vms WHERE owner_id = ? OR ? = 1;";
+        const char* sql = "SELECT slot_id, pid, status, vcpus, mem_mib, guest_ip, host_ip, tap_name, ssh_exposed, host_port, project_name, http_exposed, https_exposed, rootfs_gb, uuid, name, owner_id, allow_interproject_routing, mac FROM vms WHERE owner_id = ? OR ? = 1;";
         sqlite3_stmt* stmt;
         
         if (sqlite3_prepare_v2(db, sql, -1, &stmt, nullptr) == SQLITE_OK) {
@@ -137,6 +140,7 @@ public:
                 r.name = sqlite3_column_count(stmt) > 15 ? col_text(stmt, 15) : "";
                 r.owner_id = sqlite3_column_count(stmt) > 16 ? sqlite3_column_int(stmt, 16) : 1;
                 r.allow_interproject_routing = sqlite3_column_count(stmt) > 17 ? (sqlite3_column_int(stmt, 17) != 0) : false;
+                r.mac = sqlite3_column_count(stmt) > 18 ? col_text(stmt, 18) : "";
                 std::string hex = (r.uuid.length() > 3 && r.uuid.substr(0, 3) == "vm-") ? r.uuid.substr(3) : r.uuid;
                 r.socket_path = "/tmp/cryo-" + hex + ".socket";
                 rows.push_back(r);
@@ -162,8 +166,8 @@ public:
 
     void insert_vm(int slot, pid_t pid, const std::string& status, int vcpus, int mem,
                    const std::string& g_ip, const std::string& h_ip, const std::string& tap,
-                   bool ssh, int port, const std::string& project, bool http_exposed, bool https_exposed, int rootfs_gb, const std::string& uuid, const std::string& name, int owner_id = 1, bool allow_interproject_routing = false) {
-        const char* sql = "INSERT INTO vms (slot_id, pid, status, vcpus, mem_mib, guest_ip, host_ip, tap_name, ssh_exposed, host_port, project_name, http_exposed, https_exposed, rootfs_gb, uuid, name, owner_id, allow_interproject_routing) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);";
+                   bool ssh, int port, const std::string& project, bool http_exposed, bool https_exposed, int rootfs_gb, const std::string& uuid, const std::string& name, int owner_id = 1, bool allow_interproject_routing = false, const std::string& mac = "") {
+        const char* sql = "INSERT INTO vms (slot_id, pid, status, vcpus, mem_mib, guest_ip, host_ip, tap_name, ssh_exposed, host_port, project_name, http_exposed, https_exposed, rootfs_gb, uuid, name, owner_id, allow_interproject_routing, mac) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);";
         sqlite3_stmt* stmt;
         if (sqlite3_prepare_v2(db, sql, -1, &stmt, nullptr) == SQLITE_OK) {
             sqlite3_bind_int(stmt, 1, slot);
@@ -184,7 +188,19 @@ public:
             sqlite3_bind_text(stmt, 16, name.c_str(), -1, SQLITE_TRANSIENT);
             sqlite3_bind_int(stmt, 17, owner_id);
             sqlite3_bind_int(stmt, 18, allow_interproject_routing ? 1 : 0);
+            sqlite3_bind_text(stmt, 19, mac.c_str(), -1, SQLITE_TRANSIENT);
 
+            sqlite3_step(stmt);
+            sqlite3_finalize(stmt);
+        }
+    }
+
+    void update_mac(int slot, const std::string& mac) {
+        const char* sql = "UPDATE vms SET mac = ? WHERE slot_id = ?;";
+        sqlite3_stmt* stmt;
+        if (sqlite3_prepare_v2(db, sql, -1, &stmt, nullptr) == SQLITE_OK) {
+            sqlite3_bind_text(stmt, 1, mac.c_str(), -1, SQLITE_TRANSIENT);
+            sqlite3_bind_int(stmt, 2, slot);
             sqlite3_step(stmt);
             sqlite3_finalize(stmt);
         }
@@ -364,6 +380,20 @@ public:
             sqlite3_step(stmt);
             sqlite3_finalize(stmt);
         }
+    }
+
+    void detach_all_volumes_from_vm(int vm_id) {
+        sqlite3_stmt* stmt;
+        if (sqlite3_prepare_v2(db, "UPDATE volumes SET attached_vm_id = -1 WHERE attached_vm_id = ?;", -1, &stmt, nullptr) == SQLITE_OK) {
+            sqlite3_bind_int(stmt, 1, vm_id);
+            sqlite3_step(stmt);
+            sqlite3_finalize(stmt);
+        }
+    }
+
+    void cleanup_orphaned_volumes() {
+        const char* sql = "UPDATE volumes SET attached_vm_id = -1 WHERE attached_vm_id != -1 AND attached_vm_id NOT IN (SELECT slot_id FROM vms);";
+        execute_query(sql);
     }
 
     struct VolumeRow { int id; std::string name; int size_gb; int attached_vm_id; int owner_id; };

@@ -1,0 +1,296 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>CryoSpawn - Project Workspace</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="stylesheet" href="/style.css">
+</head>
+<body class="alpine-daylight font-sans antialiased flex h-screen overflow-hidden">
+    <!-- Alpine Daylight Horizon & Cold Wind/Snow Atmosphere -->
+    <div class="alpine-horizon" aria-hidden="true"></div>
+    <div class="alpine-weather-layer" aria-hidden="true">
+        <span class="wind-streak wind-streak--1"></span>
+        <span class="wind-streak wind-streak--2"></span>
+        <span class="wind-streak wind-streak--3"></span>
+        <span class="wind-streak wind-streak--4"></span>
+        <span class="wind-streak wind-streak--5"></span>
+        <span class="wind-streak wind-streak--6"></span>
+        <span class="snow-mote snow-mote--1"></span>
+        <span class="snow-mote snow-mote--2"></span>
+        <span class="snow-mote snow-mote--3"></span>
+        <span class="snow-mote snow-mote--4"></span>
+        <span class="snow-mote snow-mote--5"></span>
+        <span class="snow-mote snow-mote--6"></span>
+        <span class="snow-mote snow-mote--7"></span>
+        <span class="snow-mote snow-mote--8"></span>
+        <span class="snow-mote snow-mote--9"></span>
+        <span class="snow-mote snow-mote--10"></span>
+        <span class="snow-mote snow-mote--11"></span>
+        <span class="snow-mote snow-mote--12"></span>
+    </div>
+
+    <!-- Desktop Sidebar -->
+    <aside class="alpine-shell alpine-sidebar w-64 flex-col hidden md:flex shrink-0">
+        <div class="p-6 border-b border-sky-200/70">
+            <div class="flex items-center gap-2.5">
+                <span class="w-8 h-8 rounded-lg bg-[#0b4f7c] text-white flex items-center justify-center shadow-sm">
+                    <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 2v20M2 12h20M4.93 4.93l14.14 14.14M19.07 4.93L4.93 19.07"/>
+                    </svg>
+                </span>
+                <div>
+                    <h1 class="text-lg font-bold tracking-tight text-[#0c2238] leading-none">CryoSpawn</h1>
+                    <p class="text-[11px] font-medium text-[#486581] mt-1">Alpine Daylight Cloud</p>
+                </div>
+            </div>
+            <p class="text-xs font-medium text-[#0b4f7c] mt-3 bg-white/70 border border-sky-200/80 rounded-lg px-2.5 py-1.5" id="user-greeting">Loading...</p>
+        </div>
+        <nav class="flex-1 px-4 py-5 space-y-1.5" aria-label="Primary Navigation">
+            <a href="/dashboard" class="alpine-nav-active flex items-center gap-2.5 px-4 py-2.5 rounded-xl font-semibold text-sm">
+                <span>❄️</span><span>Projects Overview</span>
+            </a>
+            <a href="/volumes" class="alpine-nav-item flex items-center gap-2.5 px-4 py-2.5 rounded-xl font-medium text-sm">
+                <span>💾</span><span>Elastic Volumes</span>
+            </a>
+            <a href="/networks" class="alpine-nav-item flex items-center gap-2.5 px-4 py-2.5 rounded-xl font-medium text-sm">
+                <span>🌐</span><span>Routing &amp; Mesh</span>
+            </a>
+            <a href="/settings" class="alpine-nav-item flex items-center gap-2.5 px-4 py-2.5 rounded-xl font-medium text-sm">
+                <span>⚙️</span><span>Settings</span>
+            </a>
+        </nav>
+        <div class="p-4 border-t border-sky-200/70">
+            <button onclick="logout()" class="alpine-btn-ghost w-full flex items-center justify-center px-4 py-2 rounded-xl text-sm font-semibold text-rose-700 hover:bg-rose-50 hover:border-rose-300">
+                Logout
+            </button>
+        </div>
+    </aside>
+
+    <!-- Main Content -->
+    <main class="alpine-shell flex-1 flex flex-col overflow-y-auto min-w-0">
+        <!-- Mobile Header & Navigation -->
+        <header class="alpine-mobile-header px-4 py-3.5 md:hidden shrink-0">
+            <div class="flex items-center justify-between gap-2">
+                <div class="flex items-center gap-2 min-w-0">
+                    <span class="w-7 h-7 rounded-lg bg-[#0b4f7c] text-white flex items-center justify-center text-xs font-bold shrink-0">❄️</span>
+                    <h1 class="text-base font-bold text-[#0c2238] truncate">CryoSpawn</h1>
+                </div>
+                <div class="flex items-center gap-2 shrink-0">
+                    <button type="button" onclick="toggleMobileNav()" aria-label="Toggle navigation" class="alpine-btn-ghost px-3 py-1.5 rounded-lg text-xs font-semibold">
+                        Menu
+                    </button>
+                    <button type="button" onclick="logout()" class="px-3 py-1.5 rounded-lg text-xs font-semibold text-rose-700 bg-rose-50 border border-rose-200">
+                        Logout
+                    </button>
+                </div>
+            </div>
+            <nav id="mobile-nav-drawer" class="hidden mt-3 pt-3 border-t border-sky-200/70 grid grid-cols-2 gap-2" aria-label="Mobile Navigation">
+                <a href="/dashboard" class="alpine-nav-active px-3 py-2 rounded-lg text-xs font-semibold text-center">❄️ Projects</a>
+                <a href="/volumes" class="alpine-nav-item bg-white/70 border border-sky-200/70 px-3 py-2 rounded-lg text-xs font-semibold text-center">💾 Volumes</a>
+                <a href="/networks" class="alpine-nav-item bg-white/70 border border-sky-200/70 px-3 py-2 rounded-lg text-xs font-semibold text-center">🌐 Routing</a>
+                <a href="/settings" class="alpine-nav-item bg-white/70 border border-sky-200/70 px-3 py-2 rounded-lg text-xs font-semibold text-center">⚙️ Settings</a>
+            </nav>
+        </header>
+
+        <div class="p-5 sm:p-8 max-w-7xl mx-auto w-full space-y-6">
+            <!-- Project Breadcrumb & Header -->
+            <div class="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
+                <div>
+                    <div class="flex flex-wrap items-center gap-2 mb-2">
+                        <a href="/dashboard" class="alpine-btn-ghost inline-flex items-center gap-1.5 text-xs font-semibold px-3 py-1.5 rounded-lg">
+                            <span>←</span><span>All Projects</span>
+                        </a>
+                        <span class="text-xs text-[#486581]">/</span>
+                        <span class="text-xs font-semibold text-[#0b4f7c] bg-white/80 border border-sky-200 px-2.5 py-1 rounded-full">Project Scope</span>
+                    </div>
+                    <h2 id="project-page-title" class="text-2xl sm:text-3xl font-bold text-[#0c2238] tracking-tight">Project Workspace</h2>
+                    <p id="project-description" class="text-[#486581] text-sm mt-1">Showing strictly MicroVMs scoped to this project.</p>
+                </div>
+                <div class="flex flex-wrap items-center gap-2">
+                    <div id="project-status-summary" class="flex flex-wrap items-center gap-2"></div>
+                    <button id="delete-project-btn" type="button" onclick="deleteCurrentEmptyProject()" class="hidden px-3.5 py-2 rounded-xl text-xs font-semibold text-rose-700 bg-rose-50/90 border border-rose-200 hover:bg-rose-100 transition-colors">
+                        Delete Empty Project
+                    </button>
+                </div>
+            </div>
+
+            <div id="daemon-status-banner" class="hidden alpine-card border-amber-300 bg-amber-50/90 px-4 py-3 rounded-xl text-xs font-medium text-amber-900">
+                Hypervisor daemon unreachable — live VM status and controls require the CryoSpawn daemon to be online.
+            </div>
+
+            <!-- Unknown / Unowned Project Notice -->
+            <div id="project-not-found" class="hidden alpine-card rounded-2xl p-8 text-center max-w-xl mx-auto">
+                <div class="w-12 h-12 mx-auto rounded-2xl bg-sky-100/90 border border-sky-200 flex items-center justify-center text-xl mb-3">🧊</div>
+                <h3 class="text-lg font-bold text-[#0c2238]">Project Not Found</h3>
+                <p class="text-sm text-[#486581] mt-1">This project does not exist in your account or has not been created yet.</p>
+                <div class="mt-5 flex flex-wrap justify-center gap-3">
+                    <a href="/dashboard" class="alpine-btn-primary px-4 py-2 rounded-lg text-sm font-semibold">Back to Projects Overview</a>
+                    <button type="button" id="create-missing-project-btn" onclick="createCurrentProject()" class="alpine-btn-ghost px-4 py-2 rounded-lg text-sm font-semibold">Create This Project</button>
+                </div>
+            </div>
+
+            <!-- Scoped Project Workspace -->
+            <div id="project-workspace" class="hidden grid grid-cols-1 lg:grid-cols-3 gap-7 items-start">
+                <!-- Left Column: Pre-Targeted Deployment -->
+                <section class="alpine-card rounded-2xl p-6 lg:col-span-1 min-w-0 h-fit">
+                    <div class="flex items-center justify-between gap-2 mb-1">
+                        <h3 class="text-base font-bold text-[#0c2238]">Deploy to Project</h3>
+                        <span class="text-[10px] font-semibold uppercase tracking-wider px-2 py-0.5 rounded-full bg-sky-100 text-[#0b4f7c] border border-sky-200">Scoped</span>
+                    </div>
+                    <p class="text-xs text-[#486581] mb-4 pb-3 border-b border-sky-200/70">New instances spawned here automatically belong to this project.</p>
+                    <form id="spawn-form">
+                        <div class="space-y-4">
+                            <div>
+                                <label for="vm-name" class="block text-xs font-semibold text-[#1e3a52] mb-1">Instance Name</label>
+                                <input type="text" id="vm-name" placeholder="e.g. web-server-1" required class="alpine-input w-full rounded-lg px-3 py-2 text-sm">
+                            </div>
+                            <div>
+                                <label for="project-name" class="text-xs font-semibold text-[#1e3a52] mb-1 flex items-center justify-between">
+                                    <span>Project Group</span>
+                                    <span class="text-[10px] text-[#0b4f7c] font-semibold">Locked to workspace</span>
+                                </label>
+                                <input type="text" id="project-name" readonly class="alpine-input w-full rounded-lg px-3 py-2 text-sm">
+                            </div>
+                            <div class="grid grid-cols-2 gap-3">
+                                <div>
+                                    <label for="vcpus" class="block text-xs font-semibold text-[#1e3a52] mb-1">vCPUs</label>
+                                    <select id="vcpus" class="alpine-input w-full rounded-lg px-3 py-2 text-sm">
+                                        <option value="1">1 Core</option>
+                                        <option value="2">2 Cores</option>
+                                        <option value="4">4 Cores</option>
+                                    </select>
+                                </div>
+                                <div>
+                                    <label for="ram" class="block text-xs font-semibold text-[#1e3a52] mb-1">Memory (RAM)</label>
+                                    <select id="ram" class="alpine-input w-full rounded-lg px-3 py-2 text-sm">
+                                        <option value="256">256 MB</option>
+                                        <option value="512" selected>512 MB</option>
+                                        <option value="1024">1 GB</option>
+                                        <option value="2048">2 GB</option>
+                                    </select>
+                                </div>
+                            </div>
+                            <div>
+                                <label for="rootfs_gb" class="text-xs font-semibold text-[#1e3a52] mb-1 flex justify-between">
+                                    <span>Root Disk Size</span>
+                                    <span id="rootfs_display" class="text-[#0b4f7c] font-bold">3 GB</span>
+                                </label>
+                                <input type="range" id="rootfs_gb" min="3" max="20" value="3" class="w-full accent-[#0b4f7c]">
+                            </div>
+                            <div class="pt-2 pb-1 space-y-3 border-t border-sky-200/70">
+                                <label class="flex items-center cursor-pointer">
+                                    <input type="checkbox" id="expose-ssh" class="sr-only peer">
+                                    <div class="w-9 h-5 bg-sky-200/80 peer-focus:outline-none peer-focus:ring-2 peer-focus:ring-[#0e6ba8] rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-sky-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-[#0b4f7c] relative shrink-0"></div>
+                                    <span class="ml-3 text-sm font-medium text-[#1e3a52]">Enable SSH (Port 22)</span>
+                                </label>
+                                <label class="flex items-center cursor-pointer">
+                                    <input type="checkbox" id="expose-http" class="sr-only peer">
+                                    <div class="w-9 h-5 bg-sky-200/80 peer-focus:outline-none peer-focus:ring-2 peer-focus:ring-emerald-500 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-sky-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-emerald-600 relative shrink-0"></div>
+                                    <span class="ml-3 text-sm font-medium text-[#1e3a52]">Enable HTTP (Port 80)</span>
+                                </label>
+                                <label class="flex items-center cursor-pointer">
+                                    <input type="checkbox" id="expose-https" class="sr-only peer">
+                                    <div class="w-9 h-5 bg-sky-200/80 peer-focus:outline-none peer-focus:ring-2 peer-focus:ring-emerald-500 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-sky-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-emerald-600 relative shrink-0"></div>
+                                    <span class="ml-3 text-sm font-medium text-[#1e3a52]">Enable HTTPS (Port 443)</span>
+                                </label>
+                                <label class="flex items-center cursor-pointer">
+                                    <input type="checkbox" id="allow-interproject" class="sr-only peer">
+                                    <div class="w-9 h-5 bg-sky-200/80 peer-focus:outline-none peer-focus:ring-2 peer-focus:ring-indigo-500 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-sky-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-indigo-600 relative shrink-0"></div>
+                                    <span class="ml-3 text-sm font-medium text-[#1e3a52]">Allow Inter-Project Routing</span>
+                                </label>
+                            </div>
+                            <button type="submit" id="spawn-btn" class="alpine-btn-primary w-full font-semibold py-2.5 px-4 rounded-lg text-sm">
+                                Deploy MicroVM
+                            </button>
+                            <div id="spawn-feedback" class="hidden text-xs rounded-lg p-3 border"></div>
+                        </div>
+                    </form>
+                </section>
+
+                <!-- Right 2 Columns: Strictly Project-Scoped Instances Table -->
+                <section class="lg:col-span-2 min-w-0">
+                    <div class="alpine-card rounded-2xl overflow-hidden">
+                        <div class="alpine-card-header px-6 py-4 flex justify-between items-center gap-3">
+                            <div>
+                                <h2 class="text-base font-bold text-[#0c2238]">Project MicroVMs</h2>
+                                <p class="text-xs text-[#486581]">Strictly filtered to instances owned by you inside this project.</p>
+                            </div>
+                            <span id="vm-count-badge" class="text-xs font-semibold px-2.5 py-1 bg-white/90 border border-sky-200 text-[#0b4f7c] rounded-full whitespace-nowrap">0 VMs</span>
+                        </div>
+                        <div class="overflow-x-auto">
+                            <table class="w-full text-sm text-left">
+                                <thead class="text-xs text-[#486581] uppercase bg-sky-50/70 border-b border-sky-200/70">
+                                    <tr>
+                                        <th class="px-6 py-3">VM / Project</th>
+                                        <th class="px-6 py-3">Status</th>
+                                        <th class="px-6 py-3">IP Addresses (/30)</th>
+                                        <th class="px-6 py-3">Specs &amp; Ports</th>
+                                        <th class="px-6 py-3 text-right">Actions</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="vm-table-body" class="divide-y divide-sky-100/80"></tbody>
+                            </table>
+                        </div>
+                        <div id="empty-state" class="hidden text-center py-12 px-4">
+                            <div class="w-11 h-11 mx-auto rounded-2xl bg-sky-100/80 border border-sky-200 flex items-center justify-center text-lg mb-3">❄️</div>
+                            <p class="text-sm font-semibold text-[#0c2238]">No MicroVMs in this project yet.</p>
+                            <p class="text-xs text-[#486581] mt-1">Use the Deploy to Project panel to launch your first MicroVM here.</p>
+                        </div>
+                    </div>
+                </section>
+            </div>
+        </div>
+    </main>
+
+    <!-- SSH Connection Modal (Mobile & LAN friendly) -->
+    <div id="ssh-modal" onclick="if (event.target === this) closeSSHModal()" class="fixed inset-0 bg-[#0c2238]/40 backdrop-blur-sm z-50 flex items-center justify-center hidden p-4">
+        <div class="alpine-card rounded-2xl shadow-xl max-w-lg w-full p-6 space-y-4">
+            <div class="flex items-center justify-between pb-3 border-b border-sky-200/70">
+                <h3 class="text-base font-bold text-[#0c2238] flex items-center gap-2">
+                    <span>💻</span> SSH Connection Info
+                </h3>
+                <button type="button" onclick="closeSSHModal()" aria-label="Close SSH modal" class="text-[#486581] hover:text-[#0c2238] text-xl font-bold leading-none">&times;</button>
+            </div>
+            <div>
+                <label class="block text-xs font-semibold text-[#1e3a52] mb-1.5">SSH Terminal Command</label>
+                <div class="flex items-center gap-2">
+                    <input type="text" id="ssh-modal-input" readonly class="alpine-input flex-1 min-w-0 font-mono text-xs rounded-lg px-3 py-2 select-all">
+                    <button id="ssh-modal-copy-btn" onclick="copyFromModal()" class="alpine-btn-primary text-xs font-semibold px-4 py-2 rounded-lg whitespace-nowrap shrink-0">
+                        Copy
+                    </button>
+                </div>
+                <p class="text-[11px] text-[#486581] mt-2">
+                    Tap the command to select, or press Copy. Accessible across your local Wi-Fi/LAN network.
+                </p>
+            </div>
+            <div class="flex justify-end pt-2">
+                <button onclick="closeSSHModal()" class="alpine-btn-ghost text-xs font-semibold px-4 py-2 rounded-lg">
+                    Close
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        async function fetchUser() {
+            try {
+                const res = await fetch('/api/auth/me');
+                if (!res.ok) { window.location.href = '/login'; return; }
+                const data = await res.json();
+                document.getElementById('user-greeting').innerText = `Signed in as ${data.username}`;
+            } catch (e) {
+                window.location.href = '/login';
+            }
+        }
+        fetchUser();
+
+        async function logout() {
+            await fetch('/api/auth/logout', {method:'POST'});
+            window.location.href = '/login';
+        }
+    </script>
+    <script src="/app.js"></script>
+</body>
+</html>

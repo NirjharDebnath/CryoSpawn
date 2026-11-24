@@ -3,6 +3,8 @@
 #include <iostream>
 #include <cstdlib>
 #include <array>
+#include <vector>
+#include <unordered_set>
 #include <unistd.h>
 
 inline bool is_running_as_root() {
@@ -87,11 +89,37 @@ inline bool setup_cryo_network(const std::string& tap_name, const std::string& h
     return true;
 }
 
-inline void teardown_cryo_network(const std::string& tap_name) {
+inline void teardown_cryo_network(const std::string& tap_name, const std::string& out_iface = "") {
     if (!is_running_as_root()) return;
     std::cout << "[*] Tearing down network " << tap_name << "...\n";
+    if (!out_iface.empty()) {
+        system(("iptables -D FORWARD -i " + tap_name + " -o " + out_iface + " -j ACCEPT >/dev/null 2>&1").c_str());
+    }
+    system(("iptables -D FORWARD -i " + tap_name + " -j ACCEPT >/dev/null 2>&1").c_str());
+    system(("iptables -D FORWARD -o " + tap_name + " -j ACCEPT >/dev/null 2>&1").c_str());
     system(("ip link set " + tap_name + " down >/dev/null 2>&1").c_str());
     system(("ip tuntap del " + tap_name + " mode tap >/dev/null 2>&1").c_str());
+}
+
+inline void cleanup_orphaned_taps(const std::unordered_set<std::string>& active_tap_names) {
+    if (!is_running_as_root()) return;
+    FILE* pipe = popen("ip -o link show 2>/dev/null | awk -F': ' '{print $2}' | grep '^cryo-'", "r");
+    if (!pipe) return;
+    std::array<char, 128> buffer;
+    std::vector<std::string> existing_taps;
+    while (fgets(buffer.data(), buffer.size(), pipe) != nullptr) {
+        std::string tap = buffer.data();
+        while (!tap.empty() && (tap.back() == '\n' || tap.back() == '\r' || tap.back() == ' ')) tap.pop_back();
+        if (!tap.empty()) existing_taps.push_back(tap);
+    }
+    pclose(pipe);
+
+    for (const auto& tap : existing_taps) {
+        if (active_tap_names.find(tap) == active_tap_names.end()) {
+            std::cout << "[*] Cleaning up orphaned TAP interface: " << tap << "\n";
+            teardown_cryo_network(tap);
+        }
+    }
 }
 
 inline std::string get_lan_ip(const std::string& iface) {

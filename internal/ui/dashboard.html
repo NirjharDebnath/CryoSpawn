@@ -3,167 +3,251 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>CryoSpawn - Dashboard</title>
+    <title>CryoSpawn - Projects Dashboard</title>
     <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="stylesheet" href="/style.css">
 </head>
-<body class="bg-slate-50 text-slate-900 font-sans antialiased flex h-screen overflow-hidden">
-    <!-- Sidebar -->
-    <aside class="w-64 bg-slate-900 text-white flex flex-col hidden md:flex">
-        <div class="p-6 border-b border-slate-800">
-            <h1 class="text-xl font-bold tracking-tight">CryoSpawn</h1>
-            <p class="text-xs text-slate-400 mt-1" id="user-greeting">Loading...</p>
+<body class="alpine-daylight font-sans antialiased flex h-screen overflow-hidden">
+    <!-- Alpine Daylight Horizon & Cold Wind/Snow Atmosphere -->
+    <div class="alpine-horizon" aria-hidden="true"></div>
+    <div class="alpine-weather-layer" aria-hidden="true">
+        <span class="wind-streak wind-streak--1"></span>
+        <span class="wind-streak wind-streak--2"></span>
+        <span class="wind-streak wind-streak--3"></span>
+        <span class="wind-streak wind-streak--4"></span>
+        <span class="wind-streak wind-streak--5"></span>
+        <span class="wind-streak wind-streak--6"></span>
+        <span class="snow-mote snow-mote--1"></span>
+        <span class="snow-mote snow-mote--2"></span>
+        <span class="snow-mote snow-mote--3"></span>
+        <span class="snow-mote snow-mote--4"></span>
+        <span class="snow-mote snow-mote--5"></span>
+        <span class="snow-mote snow-mote--6"></span>
+        <span class="snow-mote snow-mote--7"></span>
+        <span class="snow-mote snow-mote--8"></span>
+        <span class="snow-mote snow-mote--9"></span>
+        <span class="snow-mote snow-mote--10"></span>
+        <span class="snow-mote snow-mote--11"></span>
+        <span class="snow-mote snow-mote--12"></span>
+    </div>
+
+    <!-- Desktop Sidebar -->
+    <aside class="alpine-shell alpine-sidebar w-64 flex-col hidden md:flex shrink-0">
+        <div class="p-6 border-b border-sky-200/70">
+            <div class="flex items-center gap-2.5">
+                <span class="w-8 h-8 rounded-lg bg-[#0b4f7c] text-white flex items-center justify-center shadow-sm">
+                    <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 2v20M2 12h20M4.93 4.93l14.14 14.14M19.07 4.93L4.93 19.07"/>
+                    </svg>
+                </span>
+                <div>
+                    <h1 class="text-lg font-bold tracking-tight text-[#0c2238] leading-none">CryoSpawn</h1>
+                    <p class="text-[11px] font-medium text-[#486581] mt-1">Alpine Daylight Cloud</p>
+                </div>
+            </div>
+            <p class="text-xs font-medium text-[#0b4f7c] mt-3 bg-white/70 border border-sky-200/80 rounded-lg px-2.5 py-1.5" id="user-greeting">Loading...</p>
         </div>
-        <nav class="flex-1 px-4 py-6 space-y-2">
-            <a href="/dashboard" class="bg-blue-600 text-white shadow-sm flex items-center px-4 py-2.5 rounded-lg transition-colors font-medium text-sm">💻 MicroVMs</a>
-            <a href="/volumes" class="text-slate-400 hover:bg-slate-800 hover:text-white flex items-center px-4 py-2.5 rounded-lg transition-colors font-medium text-sm">💾 Elastic Volumes</a>
-            <a href="/networks" class="text-slate-400 hover:bg-slate-800 hover:text-white flex items-center px-4 py-2.5 rounded-lg transition-colors font-medium text-sm">🌐 Routing & Mesh</a>
-            <a href="/settings" class="text-slate-400 hover:bg-slate-800 hover:text-white flex items-center px-4 py-2.5 rounded-lg transition-colors font-medium text-sm">⚙️ Settings</a>
+        <nav class="flex-1 px-4 py-5 space-y-1.5" aria-label="Primary Navigation">
+            <a href="/dashboard" class="alpine-nav-active flex items-center gap-2.5 px-4 py-2.5 rounded-xl font-semibold text-sm">
+                <span>❄️</span><span>Projects Overview</span>
+            </a>
+            <a href="/volumes" class="alpine-nav-item flex items-center gap-2.5 px-4 py-2.5 rounded-xl font-medium text-sm">
+                <span>💾</span><span>Elastic Volumes</span>
+            </a>
+            <a href="/networks" class="alpine-nav-item flex items-center gap-2.5 px-4 py-2.5 rounded-xl font-medium text-sm">
+                <span>🌐</span><span>Routing &amp; Mesh</span>
+            </a>
+            <a href="/settings" class="alpine-nav-item flex items-center gap-2.5 px-4 py-2.5 rounded-xl font-medium text-sm">
+                <span>⚙️</span><span>Settings</span>
+            </a>
         </nav>
-        <div class="p-4 border-t border-slate-800">
-            <button onclick="logout()" class="w-full flex items-center justify-center px-4 py-2 bg-slate-800 hover:bg-red-600 rounded-lg transition-colors text-sm font-medium">Logout</button>
+        <div class="p-4 border-t border-sky-200/70">
+            <button onclick="logout()" class="alpine-btn-ghost w-full flex items-center justify-center px-4 py-2 rounded-xl text-sm font-semibold text-rose-700 hover:bg-rose-50 hover:border-rose-300">
+                Logout
+            </button>
         </div>
     </aside>
 
     <!-- Main Content -->
-    <main class="flex-1 flex flex-col overflow-y-auto">
-        <header class="bg-white border-b border-slate-200 px-8 py-5 flex items-center justify-between md:hidden">
-            <h1 class="text-lg font-bold">CryoSpawn</h1>
-            <button onclick="logout()" class="text-sm font-medium text-red-600">Logout</button>
-        </header>
-        
-        <div class="p-8 max-w-6xl mx-auto w-full">
-            <div class="mb-8">
-                <h2 class="text-2xl font-bold text-slate-800">MicroVM Dashboard</h2>
-                <p class="text-slate-500 text-sm mt-1">Manage your isolated virtual machines.</p>
-            </div>
-            
-            
-<div class="grid grid-cols-1 lg:grid-cols-3 gap-8">
-    <div class="bg-white rounded-xl border border-slate-200 shadow-sm p-6 lg:col-span-1 h-fit">
-        <h3 class="text-base font-semibold text-slate-800 mb-4 pb-3 border-b border-slate-100">Spawn New Instance</h3>
-        <form id="spawn-form">
-            <div class="space-y-4">
-                <div>
-                    <label class="block text-xs font-medium text-slate-600 mb-1">Instance Name</label>
-                    <input type="text" id="vm-name" placeholder="e.g. web-server-1" required class="w-full border border-slate-300 rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
+    <main class="alpine-shell flex-1 flex flex-col overflow-y-auto min-w-0">
+        <!-- Mobile Header & Navigation -->
+        <header class="alpine-mobile-header px-4 py-3.5 md:hidden shrink-0">
+            <div class="flex items-center justify-between gap-2">
+                <div class="flex items-center gap-2 min-w-0">
+                    <span class="w-7 h-7 rounded-lg bg-[#0b4f7c] text-white flex items-center justify-center text-xs font-bold shrink-0">❄️</span>
+                    <h1 class="text-base font-bold text-[#0c2238] truncate">CryoSpawn</h1>
                 </div>
-                <div>
-                    <label class="block text-xs font-medium text-slate-600 mb-1">Project Group</label>
-                    <input type="text" id="project-name" value="default" class="w-full border border-slate-300 rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
-                </div>
-                <div class="grid grid-cols-2 gap-3">
-                    <div>
-                        <label class="block text-xs font-medium text-slate-600 mb-1">vCPUs</label>
-                        <select id="vcpus" class="w-full border border-slate-300 rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
-                            <option value="1">1 Core</option>
-                            <option value="2">2 Cores</option>
-                            <option value="4">4 Cores</option>
-                        </select>
-                    </div>
-                    <div>
-                        <label class="block text-xs font-medium text-slate-600 mb-1">Memory (RAM)</label>
-                        <select id="ram" class="w-full border border-slate-300 rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
-                            <option value="256">256 MB</option>
-                            <option value="512" selected>512 MB</option>
-                            <option value="1024">1 GB</option>
-                            <option value="2048">2 GB</option>
-                        </select>
-                    </div>
-                </div>
-                <div>
-                    <label class="block text-xs font-medium text-slate-600 mb-1 flex justify-between">
-                        <span>Root Disk Size</span>
-                        <span id="rootfs_display" class="text-blue-600 font-bold">3 GB</span>
-                    </label>
-                    <input type="range" id="rootfs_gb" min="3" max="20" value="3" class="w-full accent-blue-600">
-                </div>
-                <div class="pt-2 pb-2 space-y-3">
-                    <label class="flex items-center cursor-pointer">
-                        <input type="checkbox" id="expose-ssh" class="sr-only peer">
-                        <div class="w-9 h-5 bg-slate-200 peer-focus:outline-none peer-focus:ring-2 peer-focus:ring-blue-500 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-blue-600 relative"></div>
-                        <span class="ml-3 text-sm font-medium text-slate-700">Enable SSH (Port 22)</span>
-                    </label>
-                    <label class="flex items-center cursor-pointer">
-                        <input type="checkbox" id="expose-http" class="sr-only peer">
-                        <div class="w-9 h-5 bg-slate-200 peer-focus:outline-none peer-focus:ring-2 peer-focus:ring-green-500 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-green-600 relative"></div>
-                        <span class="ml-3 text-sm font-medium text-slate-700">Enable HTTP (Port 80)</span>
-                    </label>
-                    <label class="flex items-center cursor-pointer">
-                        <input type="checkbox" id="expose-https" class="sr-only peer">
-                        <div class="w-9 h-5 bg-slate-200 peer-focus:outline-none peer-focus:ring-2 peer-focus:ring-green-500 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-green-600 relative"></div>
-                        <span class="ml-3 text-sm font-medium text-slate-700">Enable HTTPS (Port 443)</span>
-                    </label>
-                    <label class="flex items-center cursor-pointer">
-                        <input type="checkbox" id="allow-interproject" class="sr-only peer">
-                        <div class="w-9 h-5 bg-slate-200 peer-focus:outline-none peer-focus:ring-2 peer-focus:ring-purple-500 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-purple-600 relative"></div>
-                        <span class="ml-3 text-sm font-medium text-slate-700">Allow Inter-Project Routing</span>
-                    </label>
-                </div>
-                <button type="submit" id="spawn-btn" class="w-full bg-blue-600 text-white font-medium py-2 px-4 rounded-md hover:bg-blue-700 transition-colors">
-                    Deploy MicroVM
-                </button>
-            </div>
-        </form>
-    </div>
-
-    <div class="lg:col-span-2">
-        <div class="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
-            <div class="px-6 py-4 border-b border-slate-200 bg-slate-50 flex justify-between items-center">
-                <h2 class="text-base font-semibold text-slate-800">Active Instances</h2>
-                <span id="vm-count-badge" class="text-xs font-medium px-2 py-1 bg-slate-200 text-slate-700 rounded-full">0 VMs</span>
-            </div>
-            <div class="overflow-x-auto">
-                <table class="w-full text-sm text-left">
-                    <thead class="text-xs text-slate-500 uppercase bg-slate-50 border-b border-slate-200">
-                        <tr>
-                            <th class="px-6 py-3">VM / Project</th>
-                            <th class="px-6 py-3">Status</th>
-                            <th class="px-6 py-3">IP Addresses (/30)</th>
-                            <th class="px-6 py-3">Specs & Ports</th>
-                            <th class="px-6 py-3 text-right">Actions</th>
-                        </tr>
-                    </thead>
-                    <tbody id="vm-table-body" class="divide-y divide-slate-100"></tbody>
-                </table>
-            </div>
-            <div id="empty-state" class="hidden text-center py-10">
-                <p class="text-sm text-slate-500">No microVMs running.</p>
-            </div>
-        </div>
-    </div>
-</div>
-
-        </div>
-    </main>
-
-    <!-- SSH Connection Modal (Mobile & LAN friendly) -->
-    <div id="ssh-modal" class="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50 flex items-center justify-center hidden p-4">
-        <div class="bg-white rounded-xl shadow-xl border border-slate-200 max-w-lg w-full p-6 space-y-4">
-            <div class="flex items-center justify-between pb-2 border-b border-slate-100">
-                <h3 class="text-base font-bold text-slate-800 flex items-center gap-2">
-                    <span>💻</span> SSH Connection Info
-                </h3>
-                <button onclick="closeSSHModal()" class="text-slate-400 hover:text-slate-600 text-xl font-bold leading-none">&times;</button>
-            </div>
-            <div>
-                <label class="block text-xs font-medium text-slate-600 mb-1">SSH Terminal Command</label>
-                <div class="flex items-center gap-2">
-                    <input type="text" id="ssh-modal-input" readonly class="flex-1 font-mono text-xs bg-slate-50 border border-slate-300 rounded-lg px-3 py-2 text-slate-800 select-all focus:outline-none focus:ring-2 focus:ring-blue-500">
-                    <button id="ssh-modal-copy-btn" onclick="copyFromModal()" class="bg-blue-600 hover:bg-blue-700 text-white text-xs font-medium px-4 py-2 rounded-lg transition-colors whitespace-nowrap">
-                        Copy
+                <div class="flex items-center gap-2 shrink-0">
+                    <button type="button" onclick="toggleMobileNav()" aria-label="Toggle navigation" class="alpine-btn-ghost px-3 py-1.5 rounded-lg text-xs font-semibold">
+                        Menu
+                    </button>
+                    <button type="button" onclick="logout()" class="px-3 py-1.5 rounded-lg text-xs font-semibold text-rose-700 bg-rose-50 border border-rose-200">
+                        Logout
                     </button>
                 </div>
-                <p class="text-[11px] text-slate-500 mt-2">
-                    Tap the command to select, or press Copy. Accessible across your local Wi-Fi/LAN network.
-                </p>
             </div>
-            <div class="flex justify-end pt-2">
-                <button onclick="closeSSHModal()" class="text-xs bg-slate-100 hover:bg-slate-200 text-slate-700 font-medium px-4 py-2 rounded-lg transition-colors">
-                    Close
-                </button>
+            <nav id="mobile-nav-drawer" class="hidden mt-3 pt-3 border-t border-sky-200/70 grid grid-cols-2 gap-2" aria-label="Mobile Navigation">
+                <a href="/dashboard" class="alpine-nav-active px-3 py-2 rounded-lg text-xs font-semibold text-center">❄️ Projects</a>
+                <a href="/volumes" class="alpine-nav-item bg-white/70 border border-sky-200/70 px-3 py-2 rounded-lg text-xs font-semibold text-center">💾 Volumes</a>
+                <a href="/networks" class="alpine-nav-item bg-white/70 border border-sky-200/70 px-3 py-2 rounded-lg text-xs font-semibold text-center">🌐 Routing</a>
+                <a href="/settings" class="alpine-nav-item bg-white/70 border border-sky-200/70 px-3 py-2 rounded-lg text-xs font-semibold text-center">⚙️ Settings</a>
+            </nav>
+        </header>
+
+        <div class="p-5 sm:p-8 max-w-7xl mx-auto w-full space-y-6">
+            <!-- Page Header & Fleet Summary -->
+            <div class="flex flex-col sm:flex-row sm:items-end sm:justify-between gap-4">
+                <div>
+                    <span class="inline-flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wider text-[#0b4f7c] bg-white/80 border border-sky-200/80 px-2.5 py-1 rounded-full mb-2">
+                        <span class="w-1.5 h-1.5 rounded-full bg-[#0e6ba8]"></span>
+                        Project-First Workspace
+                    </span>
+                    <h2 class="text-2xl sm:text-3xl font-bold text-[#0c2238] tracking-tight">Your Projects</h2>
+                    <p class="text-[#486581] text-sm mt-1">Select a project card to open its dedicated MicroVM workspace, or deploy a new instance directly.</p>
+                </div>
+                <div class="flex flex-wrap items-center gap-2">
+                    <div class="alpine-card px-3.5 py-2 rounded-xl text-xs font-semibold text-[#1e3a52] flex items-center gap-2">
+                        <span class="text-[#0b4f7c]" id="summary-projects-count">0</span>
+                        <span class="text-[#486581]">Projects</span>
+                    </div>
+                    <div class="alpine-card px-3.5 py-2 rounded-xl text-xs font-semibold text-[#1e3a52] flex items-center gap-2">
+                        <span class="text-[#0b4f7c]" id="summary-vms-count">0</span>
+                        <span class="text-[#486581]">Total VMs</span>
+                    </div>
+                    <div class="alpine-card px-3.5 py-2 rounded-xl text-xs font-semibold text-[#1e3a52] flex items-center gap-2">
+                        <span class="w-2 h-2 rounded-full bg-emerald-500"></span>
+                        <span class="text-emerald-700" id="summary-running-count">0</span>
+                        <span class="text-[#486581]">Running</span>
+                    </div>
+                </div>
+            </div>
+
+            <div id="daemon-status-banner" class="hidden alpine-card border-amber-300 bg-amber-50/90 px-4 py-3 rounded-xl text-xs font-medium text-amber-900">
+                Hypervisor daemon unreachable — displaying your persisted projects. Live VM telemetry will resume automatically once the daemon is online.
+            </div>
+
+            <div class="grid grid-cols-1 lg:grid-cols-3 gap-7 items-start">
+                <!-- Left 2 Columns: Create Project + Project Cards Grid -->
+                <div class="lg:col-span-2 min-w-0 space-y-6">
+                    <!-- Create Empty Project Card -->
+                    <section class="alpine-card rounded-2xl overflow-hidden">
+                        <div class="alpine-card-header px-6 py-4 flex flex-wrap items-center justify-between gap-2">
+                            <div>
+                                <h3 class="text-base font-bold text-[#0c2238]">Create New Project</h3>
+                                <p class="text-xs text-[#486581]">Create a dedicated workspace before deploying MicroVMs.</p>
+                            </div>
+                        </div>
+                        <div class="p-5 sm:p-6">
+                            <form id="create-project-form" class="flex flex-col sm:flex-row sm:flex-wrap items-stretch sm:items-end gap-3">
+                                <div class="flex-1 min-w-[140px]">
+                                    <label for="new-project-name" class="block text-xs font-semibold text-[#1e3a52] mb-1">Project Name</label>
+                                    <input type="text" id="new-project-name" placeholder="e.g. nordic-api" required maxlength="64" class="alpine-input w-full rounded-lg px-3 py-2 text-sm">
+                                </div>
+                                <div class="flex-1 min-w-[140px]">
+                                    <label for="new-project-desc" class="block text-xs font-semibold text-[#1e3a52] mb-1">Description (optional)</label>
+                                    <input type="text" id="new-project-desc" placeholder="Staging cluster or web tier" maxlength="200" class="alpine-input w-full rounded-lg px-3 py-2 text-sm">
+                                </div>
+                                <button type="submit" id="create-project-btn" class="alpine-btn-primary font-semibold px-5 py-2 rounded-lg text-sm whitespace-nowrap">
+                                    + Create Project
+                                </button>
+                            </form>
+                            <p id="project-create-msg" class="hidden text-xs font-medium mt-3"></p>
+                        </div>
+                    </section>
+
+                    <!-- Owned Projects Cards Overview -->
+                    <section class="alpine-card rounded-2xl overflow-hidden">
+                        <div class="alpine-card-header px-6 py-4 flex items-center justify-between">
+                            <div>
+                                <h3 class="text-base font-bold text-[#0c2238]">Owned Project Workspaces</h3>
+                                <p class="text-xs text-[#486581]">Tap any project card to view and control only its MicroVMs.</p>
+                            </div>
+                            <span id="projects-count-badge" class="text-xs font-semibold px-2.5 py-1 bg-white/90 border border-sky-200 text-[#0b4f7c] rounded-full shrink-0 whitespace-nowrap">0 Projects</span>
+                        </div>
+                        <div class="p-5 sm:p-6">
+                            <div id="projects-grid" class="grid grid-cols-1 sm:grid-cols-2 gap-4"></div>
+                            <div id="projects-empty-state" class="hidden text-center py-10 px-4">
+                                <div class="w-12 h-12 mx-auto rounded-2xl bg-sky-100/80 border border-sky-200 flex items-center justify-center text-xl mb-3">🏔️</div>
+                                <p class="text-sm font-semibold text-[#0c2238]">No projects in your workspace yet</p>
+                                <p class="text-xs text-[#486581] mt-1">Create an empty project above or deploy a MicroVM on the right to get started.</p>
+                            </div>
+                        </div>
+                    </section>
+                </div>
+
+                <!-- Right Column: Integrated MicroVM Deployment -->
+                <section class="alpine-card rounded-2xl p-6 lg:col-span-1 min-w-0 h-fit">
+                    <h3 class="text-base font-bold text-[#0c2238] mb-1">Deploy MicroVM</h3>
+                    <p class="text-xs text-[#486581] mb-4 pb-3 border-b border-sky-200/70">Provision an isolated Firecracker VM into any project.</p>
+                    <form id="spawn-form">
+                        <div class="space-y-4">
+                            <div>
+                                <label for="vm-name" class="block text-xs font-semibold text-[#1e3a52] mb-1">Instance Name</label>
+                                <input type="text" id="vm-name" placeholder="e.g. web-server-1" required class="alpine-input w-full rounded-lg px-3 py-2 text-sm">
+                            </div>
+                            <div>
+                                <label for="project-name" class="block text-xs font-semibold text-[#1e3a52] mb-1">Target Project</label>
+                                <input type="text" id="project-name" list="project-options" value="default" required class="alpine-input w-full rounded-lg px-3 py-2 text-sm">
+                                <datalist id="project-options"></datalist>
+                            </div>
+                            <div class="grid grid-cols-2 gap-3">
+                                <div>
+                                    <label for="vcpus" class="block text-xs font-semibold text-[#1e3a52] mb-1">vCPUs</label>
+                                    <select id="vcpus" class="alpine-input w-full rounded-lg px-3 py-2 text-sm">
+                                        <option value="1">1 Core</option>
+                                        <option value="2">2 Cores</option>
+                                        <option value="4">4 Cores</option>
+                                    </select>
+                                </div>
+                                <div>
+                                    <label for="ram" class="block text-xs font-semibold text-[#1e3a52] mb-1">Memory (RAM)</label>
+                                    <select id="ram" class="alpine-input w-full rounded-lg px-3 py-2 text-sm">
+                                        <option value="256">256 MB</option>
+                                        <option value="512" selected>512 MB</option>
+                                        <option value="1024">1 GB</option>
+                                        <option value="2048">2 GB</option>
+                                    </select>
+                                </div>
+                            </div>
+                            <div>
+                                <label for="rootfs_gb" class="text-xs font-semibold text-[#1e3a52] mb-1 flex justify-between">
+                                    <span>Root Disk Size</span>
+                                    <span id="rootfs_display" class="text-[#0b4f7c] font-bold">3 GB</span>
+                                </label>
+                                <input type="range" id="rootfs_gb" min="3" max="20" value="3" class="w-full accent-[#0b4f7c]">
+                            </div>
+                            <div class="pt-2 pb-1 space-y-3 border-t border-sky-200/70">
+                                <label class="flex items-center cursor-pointer">
+                                    <input type="checkbox" id="expose-ssh" class="sr-only peer">
+                                    <div class="w-9 h-5 bg-sky-200/80 peer-focus:outline-none peer-focus:ring-2 peer-focus:ring-[#0e6ba8] rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-sky-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-[#0b4f7c] relative shrink-0"></div>
+                                    <span class="ml-3 text-sm font-medium text-[#1e3a52]">Enable SSH (Port 22)</span>
+                                </label>
+                                <label class="flex items-center cursor-pointer">
+                                    <input type="checkbox" id="expose-http" class="sr-only peer">
+                                    <div class="w-9 h-5 bg-sky-200/80 peer-focus:outline-none peer-focus:ring-2 peer-focus:ring-emerald-500 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-sky-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-emerald-600 relative shrink-0"></div>
+                                    <span class="ml-3 text-sm font-medium text-[#1e3a52]">Enable HTTP (Port 80)</span>
+                                </label>
+                                <label class="flex items-center cursor-pointer">
+                                    <input type="checkbox" id="expose-https" class="sr-only peer">
+                                    <div class="w-9 h-5 bg-sky-200/80 peer-focus:outline-none peer-focus:ring-2 peer-focus:ring-emerald-500 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-sky-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-emerald-600 relative shrink-0"></div>
+                                    <span class="ml-3 text-sm font-medium text-[#1e3a52]">Enable HTTPS (Port 443)</span>
+                                </label>
+                                <label class="flex items-center cursor-pointer">
+                                    <input type="checkbox" id="allow-interproject" class="sr-only peer">
+                                    <div class="w-9 h-5 bg-sky-200/80 peer-focus:outline-none peer-focus:ring-2 peer-focus:ring-indigo-500 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-sky-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-indigo-600 relative shrink-0"></div>
+                                    <span class="ml-3 text-sm font-medium text-[#1e3a52]">Allow Inter-Project Routing</span>
+                                </label>
+                            </div>
+                            <button type="submit" id="spawn-btn" class="alpine-btn-primary w-full font-semibold py-2.5 px-4 rounded-lg text-sm">
+                                Deploy MicroVM
+                            </button>
+                            <div id="spawn-feedback" class="hidden text-xs rounded-lg p-3 border"></div>
+                        </div>
+                    </form>
+                </section>
             </div>
         </div>
-    </div>
+    </main>
 
     <script>
         async function fetchUser() {
@@ -171,7 +255,7 @@
                 const res = await fetch('/api/auth/me');
                 if (!res.ok) { window.location.href = '/login'; return; }
                 const data = await res.json();
-                document.getElementById('user-greeting').innerText = `Welcome, ${data.username}`;
+                document.getElementById('user-greeting').innerText = `Signed in as ${data.username}`;
             } catch (e) {
                 window.location.href = '/login';
             }
@@ -183,6 +267,6 @@
             window.location.href = '/login';
         }
     </script>
-    <script src="app.js"></script>
+    <script src="/app.js"></script>
 </body>
 </html>

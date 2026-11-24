@@ -6,7 +6,7 @@
 #include <sys/socket.h>
 #include <sys/un.h>
 
-bool is_http_success(const std::string& response) {
+inline bool is_http_success(const std::string& response) {
     if (response.rfind("HTTP/1.", 0) == 0 && response.length() >= 12) {
         try {
             int code = std::stoi(response.substr(9, 3));
@@ -16,7 +16,7 @@ bool is_http_success(const std::string& response) {
     return false;
 }
 
-bool send_firecracker_put(const std::string& socket_path, const std::string& endpoint, const std::string& json_body) {
+inline bool send_firecracker_put(const std::string& socket_path, const std::string& endpoint, const std::string& json_body) {
     int sock = socket(AF_UNIX, SOCK_STREAM, 0);
     if (sock < 0) return false;
 
@@ -56,7 +56,7 @@ bool send_firecracker_put(const std::string& socket_path, const std::string& end
     return false;
 }
 
-bool send_firecracker_patch(const std::string& socket_path, const std::string& endpoint, const std::string& json_body) {
+inline bool send_firecracker_patch(const std::string& socket_path, const std::string& endpoint, const std::string& json_body) {
     int sock = socket(AF_UNIX, SOCK_STREAM, 0);
     if (sock < 0) return false;
 

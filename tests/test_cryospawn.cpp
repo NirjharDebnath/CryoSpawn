@@ -398,8 +398,13 @@ void test_api_server_multitenancy_and_interproject() {
         auto res = cli.Get("/api/vms", admin_hdrs);
         assert(res && res->status == 200);
         auto j = json::parse(res->body);
-        assert(j.size() == 4);
-        std::cout << "  [✓] GET /api/vms strictly scoped by owner_id (admin sees all)\n";
+        assert(j.size() == 0); // Admin owns 0 VMs here, dashboard strictly shows admin's VMs
+
+        auto res_all = cli.Get("/api/vms?all=true", admin_hdrs);
+        assert(res_all && res_all->status == 200);
+        auto j_all = json::parse(res_all->body);
+        assert(j_all.size() == 4); // ?all=true allows global diagnostic view
+        std::cout << "  [✓] GET /api/vms strictly scoped by owner_id (admin dashboard isolated; ?all=true for diagnostics)\n";
     }
 
     // 2. Direct API requests GET /api/volumes return only tenant's resources
@@ -424,8 +429,13 @@ void test_api_server_multitenancy_and_interproject() {
         auto res = cli.Get("/api/volumes", admin_hdrs);
         assert(res && res->status == 200);
         auto j = json::parse(res->body);
-        assert(j.size() == 2);
-        std::cout << "  [✓] GET /api/volumes strictly scoped by owner_id\n";
+        assert(j.size() == 0); // Admin owns 0 volumes, dashboard strictly isolated
+
+        auto res_all = cli.Get("/api/volumes?all=true", admin_hdrs);
+        assert(res_all && res_all->status == 200);
+        auto j_all = json::parse(res_all->body);
+        assert(j_all.size() == 2);
+        std::cout << "  [✓] GET /api/volumes strictly scoped by owner_id (admin dashboard isolated; ?all=true for diagnostics)\n";
     }
 
     // 3. Attempting to restart, hibernate, delete another tenant's VM returns 403 Forbidden
@@ -689,6 +699,16 @@ void test_api_server_multitenancy_and_interproject() {
         auto res_bad_vol_id = cli.Post("/api/volumes/999999999999999999999/attach", u10_hdrs, "{}", "application/json");
         assert(res_bad_vol_id && res_bad_vol_id->status == 400);
 
+        json create_vol_body = {{"name", "test-api-vol"}, {"size_gb", 2}};
+        auto res_create_vol = cli.Post("/api/volumes", u10_hdrs, create_vol_body.dump(), "application/json");
+        assert(res_create_vol && res_create_vol->status == 200);
+        auto j_created_vol = json::parse(res_create_vol->body);
+        assert(j_created_vol.is_object());
+        assert(j_created_vol["status"] == "created");
+        assert(j_created_vol["id"].is_number_integer());
+        auto res_del_created_vol = cli.Delete(("/api/volumes/" + std::to_string(j_created_vol["id"].get<int>())).c_str(), u10_hdrs);
+        assert(res_del_created_vol && res_del_created_vol->status == 200);
+
         // (c) Volume detachment when VM is destroyed
         // Attach vol_u10 to vm-u10-alpha
         json attach_body = {{"vm_id", "vm-u10-alpha"}};
@@ -749,6 +769,305 @@ void test_api_server_multitenancy_and_interproject() {
     unlink((test_db + "-shm").c_str());
 }
 
+void test_mac_address_and_port_toggle_stability() {
+    std::cout << "[TEST] Testing MAC Address Generation & Port Toggle Stability (No Segfault)...\n";
+
+    // 1. Test generate_mac format and values
+    std::string mac0 = VMManager::generate_mac(0);
+    assert(mac0 == "06:00:AC:10:00:02");
+    std::string mac1 = VMManager::generate_mac(1);
+    assert(mac1 == "06:00:AC:10:00:06");
+    std::string mac64 = VMManager::generate_mac(64);
+    assert(mac64 == "06:00:AC:10:01:02");
+    std::cout << "  [✓] generate_mac produces valid unicast EUI-48 matching guest IP (06:00:AC:10:xx:yy)\n";
+
+    // 2. Test database persistence and reconcile_state MAC preservation
+    std::string test_db = "/tmp/test_cryospawn_mac_" + std::to_string(getpid()) + ".db";
+    unlink(test_db.c_str());
+    {
+        Database db(test_db);
+        // Insert a VM without MAC
+        db.insert_vm(0, 0, "stopped", 1, 512, "172.16.0.2", "172.16.0.1", "cryo-test0", false, 0, "default", false, false, 3, "vm-test0", "test0", 1, false, "");
+        auto vms = db.get_all_vms(1, true);
+        assert(!vms.empty());
+        assert(vms[0].mac.empty());
+
+        // Reconcile via VMManager
+        VMManager mgr(test_db);
+        MicroVM vm;
+        assert(mgr.get_vm(0, vm));
+        assert(!vm.mac.empty());
+        assert(vm.mac == "06:00:AC:10:00:02");
+        std::cout << "  [✓] reconcile_state generates and persists fallback MAC if missing\n";
+
+        // Check DB was updated with generated MAC
+        auto vms_updated = db.get_all_vms(1, true);
+        assert(vms_updated[0].mac == "06:00:AC:10:00:02");
+    }
+
+    // 3. Test REST API Port Toggling on authorized VM (regression test for SIGSEGV)
+    int api_port = 29970 + (getpid() % 1000);
+    httplib::Server svr;
+    VMManager manager(test_db);
+    register_routes(svr, manager, "", "");
+
+    MicroVM test_vm;
+    test_vm.id = 5;
+    test_vm.uuid = "vm-port-toggle-safe";
+    test_vm.name = "port-toggle-vm";
+    test_vm.owner_id = 42;
+    test_vm.ip = "172.16.0.22";
+    test_vm.host_ip = "172.16.0.21";
+    test_vm.tap_name = "cryo-porttest";
+    test_vm.status = "stopped";
+    test_vm.mac = VMManager::generate_mac(5);
+    manager.add_vm_for_test(test_vm);
+
+    std::thread server_thread([&svr, api_port]() {
+        svr.listen("127.0.0.1", api_port);
+    });
+    std::this_thread::sleep_for(std::chrono::milliseconds(200));
+
+    httplib::Client cli("127.0.0.1", api_port);
+    cli.set_connection_timeout(5);
+    httplib::Headers u42_hdrs = {{"X-User-ID", "42"}, {"X-Role", "user"}};
+
+    // Turn ON SSH, HTTP, and HTTPS ports - this triggers sync_vm_proxies!
+    // Previously, calling sync_vm_proxies on stack-use-after-free caused an instant SEGFAULT.
+    json toggle_on = {
+        {"ssh_exposed", true},
+        {"http_exposed", true},
+        {"https_exposed", true},
+        {"allow_interproject_routing", true}
+    };
+    auto res_on = cli.Patch("/api/vms/vm-port-toggle-safe/ports", u42_hdrs, toggle_on.dump(), "application/json");
+    assert(res_on && res_on->status == 200);
+    auto j_on = json::parse(res_on->body);
+    assert(j_on["status"] == "ports updated");
+    std::cout << "  [✓] PATCH /ports toggled ON without segfaulting (sync_vm_proxies executed safely)\n";
+
+    // Verify VM ports state in manager
+    MicroVM check_vm;
+    assert(manager.get_vm(5, check_vm));
+    assert(check_vm.ssh_exposed == true);
+    assert(check_vm.http_exposed == true);
+    assert(check_vm.https_exposed == true);
+    assert(check_vm.allow_interproject_routing == true);
+
+    // Turn OFF ports
+    json toggle_off = {
+        {"ssh_exposed", false},
+        {"http_exposed", false},
+        {"https_exposed", false}
+    };
+    auto res_off = cli.Patch("/api/vms/vm-port-toggle-safe/ports", u42_hdrs, toggle_off.dump(), "application/json");
+    assert(res_off && res_off->status == 200);
+    std::cout << "  [✓] PATCH /ports toggled OFF without segfaulting\n";
+
+    assert(manager.get_vm(5, check_vm));
+    assert(check_vm.ssh_exposed == false);
+    assert(check_vm.http_exposed == false);
+    assert(check_vm.https_exposed == false);
+
+    svr.stop();
+    server_thread.join();
+
+    unlink(test_db.c_str());
+    unlink((test_db + "-wal").c_str());
+    unlink((test_db + "-shm").c_str());
+    std::cout << "  [✓] MAC address & port toggle stability tests passed!\n";
+}
+
+void test_daemon_restart_recovery_and_rbac_isolation() {
+    std::cout << "[TEST] Testing Daemon Restart Recovery, Synchronous Termination, and Strict Multi-Tenant RBAC...\n";
+
+    std::string test_db = "/tmp/test_cryospawn_rbac_" + std::to_string(getpid()) + ".db";
+    unlink(test_db.c_str());
+    unlink((test_db + "-wal").c_str());
+    unlink((test_db + "-shm").c_str());
+
+    // 1. Test adopted VM recovery and synchronous termination (no hanging in "terminating")
+    pid_t dummy_child = fork();
+    if (dummy_child == 0) {
+        // Sleep for a long time simulating a running adopted firecracker process
+        execlp("sleep", "sleep", "120", (char*)NULL);
+        _exit(1);
+    }
+    assert(dummy_child > 0);
+    std::this_thread::sleep_for(std::chrono::milliseconds(50));
+    assert(kill(dummy_child, 0) == 0);
+
+    {
+        Database db(test_db);
+        // Insert VM 0 as running with dummy_child PID, owner_id = 1
+        db.insert_vm(0, dummy_child, "running", 1, 512, "172.16.0.2", "172.16.0.1", "cryo-test-reap", false, 0, "default", false, false, 3, "vm-adopted-reap", "adopted-vm", 1, false, "06:00:AC:10:00:02");
+
+        // Insert volume 100 attached to VM 0, and volume 200 attached to non-existent VM 999
+        int vol1 = db.insert_volume("vol-attached", 5, 1);
+        db.attach_volume(vol1, 0);
+        int vol2 = db.insert_volume("vol-orphaned", 10, 1);
+        db.attach_volume(vol2, 999);
+
+        // Simulate daemon startup and state reconciliation
+        VMManager mgr(test_db);
+        MicroVM adopted_vm;
+        assert(mgr.get_vm(0, adopted_vm));
+        assert(adopted_vm.status == "running");
+        assert(adopted_vm.pid == dummy_child);
+        std::cout << "  [✓] Adopted running VM recognized on daemon startup\n";
+
+        // Orphaned volume 200 should have been detached during reconcile_state
+        Database::VolumeRow v2_row;
+        assert(db.get_volume(vol2, v2_row));
+        assert(v2_row.attached_vm_id == -1);
+        std::cout << "  [✓] Orphaned volume attachment cleaned up on reconcile_state\n";
+
+        // Terminate the adopted VM synchronously
+        mgr.terminate_vm(0);
+
+        // VM must be immediately gone from manager (never stuck in "terminating")
+        MicroVM check_deleted;
+        assert(!mgr.get_vm(0, check_deleted));
+
+        // The process must be dead
+        std::this_thread::sleep_for(std::chrono::milliseconds(50));
+        assert(kill(dummy_child, 0) != 0);
+
+        // Volume 100 must be cleanly detached
+        Database::VolumeRow v1_row;
+        assert(db.get_volume(vol1, v1_row));
+        assert(v1_row.attached_vm_id == -1);
+        std::cout << "  [✓] Adopted VM terminated synchronously without hanging; volume detached\n";
+
+        mgr.delete_volume(vol1);
+        mgr.delete_volume(vol2);
+    }
+
+    // 2. Test Multi-Tenant RBAC Isolation via REST API
+    int api_port = 29980 + (getpid() % 1000);
+    httplib::Server svr;
+    VMManager manager(test_db);
+    register_routes(svr, manager, "", "");
+
+    // Seed VM for User 1 (Admin) and VM for User 2 (Regular user)
+    MicroVM vm_u1;
+    vm_u1.id = 1;
+    vm_u1.uuid = "vm-u1-isolated";
+    vm_u1.name = "user1-vm";
+    vm_u1.owner_id = 1; // Admin user
+    vm_u1.status = "stopped";
+    vm_u1.ip = "172.16.0.6";
+    vm_u1.host_ip = "172.16.0.5";
+    vm_u1.tap_name = "cryo-u1";
+    vm_u1.mac = VMManager::generate_mac(1);
+    manager.add_vm_for_test(vm_u1);
+
+    MicroVM vm_u2;
+    vm_u2.id = 2;
+    vm_u2.uuid = "vm-u2-isolated";
+    vm_u2.name = "user2-vm";
+    vm_u2.owner_id = 2; // User 2
+    vm_u2.status = "stopped";
+    vm_u2.ip = "172.16.0.10";
+    vm_u2.host_ip = "172.16.0.9";
+    vm_u2.tap_name = "cryo-u2";
+    vm_u2.mac = VMManager::generate_mac(2);
+    manager.add_vm_for_test(vm_u2);
+
+    // Create volume for User 1 and User 2
+    int vol_u1 = manager.create_volume("vol-user1", 5, 1);
+    int vol_u2 = manager.create_volume("vol-user2", 5, 2);
+
+    std::thread server_thread([&svr, api_port]() {
+        svr.listen("127.0.0.1", api_port);
+    });
+    std::this_thread::sleep_for(std::chrono::milliseconds(200));
+
+    httplib::Client cli("127.0.0.1", api_port);
+    cli.set_connection_timeout(5);
+
+    httplib::Headers u1_headers = {{"X-User-ID", "1"}, {"X-Role", "admin"}};
+    httplib::Headers u2_headers = {{"X-User-ID", "2"}, {"X-Role", "user"}};
+
+    // Dashboard GET /api/vms for User 1 (admin): MUST only return User 1's VM
+    auto res_vms_u1 = cli.Get("/api/vms", u1_headers);
+    assert(res_vms_u1 && res_vms_u1->status == 200);
+    auto j_vms_u1 = json::parse(res_vms_u1->body);
+    assert(j_vms_u1.size() == 1);
+    assert(j_vms_u1[0]["uuid"] == "vm-u1-isolated");
+    std::cout << "  [✓] User 1 (admin) dashboard strictly returns only User 1's VM\n";
+
+    // Dashboard GET /api/vms for User 2: MUST only return User 2's VM
+    auto res_vms_u2 = cli.Get("/api/vms", u2_headers);
+    assert(res_vms_u2 && res_vms_u2->status == 200);
+    auto j_vms_u2 = json::parse(res_vms_u2->body);
+    assert(j_vms_u2.size() == 1);
+    assert(j_vms_u2[0]["uuid"] == "vm-u2-isolated");
+    std::cout << "  [✓] User 2 dashboard strictly returns only User 2's VM\n";
+
+    // Admin diagnostic query ?all=true returns all VMs
+    auto res_vms_all = cli.Get("/api/vms?all=true", u1_headers);
+    assert(res_vms_all && res_vms_all->status == 200);
+    auto j_vms_all = json::parse(res_vms_all->body);
+    assert(j_vms_all.size() == 2);
+    std::cout << "  [✓] Admin explicit ?all=true diagnostic returns global inventory\n";
+
+    // Non-admin requesting ?all=true still only gets own VMs
+    auto res_vms_u2_all = cli.Get("/api/vms?all=true", u2_headers);
+    assert(res_vms_u2_all && res_vms_u2_all->status == 200);
+    auto j_vms_u2_all = json::parse(res_vms_u2_all->body);
+    assert(j_vms_u2_all.size() == 1);
+    assert(j_vms_u2_all[0]["uuid"] == "vm-u2-isolated");
+
+    // Cross-tenant VM mutation attempt: User 1 trying to modify or delete User 2's VM
+    auto res_del_cross1 = cli.Delete("/api/vms/vm-u2-isolated", u1_headers);
+    assert(res_del_cross1 && res_del_cross1->status == 403);
+    auto res_restart_cross1 = cli.Post("/api/vms/vm-u2-isolated/restart", u1_headers, "", "application/json");
+    assert(res_restart_cross1 && res_restart_cross1->status == 403);
+    auto res_ports_cross1 = cli.Patch("/api/vms/vm-u2-isolated/ports", u1_headers, "{\"ssh_exposed\": true}", "application/json");
+    assert(res_ports_cross1 && res_ports_cross1->status == 403);
+    std::cout << "  [✓] Cross-tenant control of User 2's VM by User 1 rejected with 403 Forbidden\n";
+
+    // Cross-tenant VM mutation attempt: User 2 trying to modify or delete User 1's VM
+    auto res_del_cross2 = cli.Delete("/api/vms/vm-u1-isolated", u2_headers);
+    assert(res_del_cross2 && res_del_cross2->status == 403);
+    auto res_restart_cross2 = cli.Post("/api/vms/vm-u1-isolated/restart", u2_headers, "", "application/json");
+    assert(res_restart_cross2 && res_restart_cross2->status == 403);
+    std::cout << "  [✓] Cross-tenant control of User 1's VM by User 2 rejected with 403 Forbidden\n";
+
+    // Volume isolation
+    auto res_vol_u1 = cli.Get("/api/volumes", u1_headers);
+    assert(res_vol_u1 && res_vol_u1->status == 200);
+    auto j_vol_u1 = json::parse(res_vol_u1->body);
+    assert(j_vol_u1.size() == 1);
+    assert(j_vol_u1[0]["id"] == vol_u1);
+
+    auto res_vol_u2 = cli.Get("/api/volumes", u2_headers);
+    assert(res_vol_u2 && res_vol_u2->status == 200);
+    auto j_vol_u2 = json::parse(res_vol_u2->body);
+    assert(j_vol_u2.size() == 1);
+    assert(j_vol_u2[0]["id"] == vol_u2);
+    std::cout << "  [✓] Volume dashboards strictly isolated per user\n";
+
+    // Cross-tenant volume deletion attempt
+    auto res_del_vol_cross = cli.Delete(("/api/volumes/" + std::to_string(vol_u2)).c_str(), u1_headers);
+    assert(res_del_vol_cross && res_del_vol_cross->status == 403);
+
+    // Cross-tenant volume attach attempt
+    json attach_body = {{"vm_id", "vm-u1-isolated"}};
+    auto res_att_cross = cli.Post(("/api/volumes/" + std::to_string(vol_u2) + "/attach").c_str(), u1_headers, attach_body.dump(), "application/json");
+    assert(res_att_cross && res_att_cross->status == 403);
+    std::cout << "  [✓] Cross-tenant volume actions rejected with 403 Forbidden\n";
+
+    svr.stop();
+    server_thread.join();
+
+    unlink(test_db.c_str());
+    unlink((test_db + "-wal").c_str());
+    unlink((test_db + "-shm").c_str());
+    std::cout << "  [✓] Daemon restart recovery, termination, and RBAC tests passed successfully!\n";
+}
+
 int main() {
     std::cout << "==========================================\n";
     std::cout << "   CryoSpawn Deep Verification Test Suite \n";
@@ -757,6 +1076,8 @@ int main() {
     test_ghost_proxy_tcp();
     test_multitenant_and_interproject_routing_logic();
     test_api_server_multitenancy_and_interproject();
+    test_mac_address_and_port_toggle_stability();
+    test_daemon_restart_recovery_and_rbac_isolation();
     std::cout << "==========================================\n";
     std::cout << " [✓] ALL DEEP VERIFICATION TESTS PASSED!  \n";
     std::cout << "==========================================\n";

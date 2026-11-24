@@ -3,86 +3,151 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>CryoSpawn - Networks</title>
+    <title>CryoSpawn - Routing &amp; Mesh</title>
     <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="stylesheet" href="/style.css">
 </head>
-<body class="bg-slate-50 text-slate-900 font-sans antialiased flex h-screen overflow-hidden">
-    <!-- Sidebar -->
-    <aside class="w-64 bg-slate-900 text-white flex flex-col hidden md:flex">
-        <div class="p-6 border-b border-slate-800">
-            <h1 class="text-xl font-bold tracking-tight">CryoSpawn</h1>
-            <p class="text-xs text-slate-400 mt-1" id="user-greeting">Loading...</p>
+<body class="alpine-daylight font-sans antialiased flex h-screen overflow-hidden">
+    <!-- Alpine Daylight Horizon & Cold Wind/Snow Atmosphere -->
+    <div class="alpine-horizon" aria-hidden="true"></div>
+    <div class="alpine-weather-layer" aria-hidden="true">
+        <span class="wind-streak wind-streak--1"></span>
+        <span class="wind-streak wind-streak--2"></span>
+        <span class="wind-streak wind-streak--3"></span>
+        <span class="wind-streak wind-streak--4"></span>
+        <span class="wind-streak wind-streak--5"></span>
+        <span class="wind-streak wind-streak--6"></span>
+        <span class="snow-mote snow-mote--1"></span>
+        <span class="snow-mote snow-mote--2"></span>
+        <span class="snow-mote snow-mote--3"></span>
+        <span class="snow-mote snow-mote--4"></span>
+        <span class="snow-mote snow-mote--5"></span>
+        <span class="snow-mote snow-mote--6"></span>
+        <span class="snow-mote snow-mote--7"></span>
+        <span class="snow-mote snow-mote--8"></span>
+        <span class="snow-mote snow-mote--9"></span>
+        <span class="snow-mote snow-mote--10"></span>
+        <span class="snow-mote snow-mote--11"></span>
+        <span class="snow-mote snow-mote--12"></span>
+    </div>
+
+    <!-- Desktop Sidebar -->
+    <aside class="alpine-shell alpine-sidebar w-64 flex-col hidden md:flex shrink-0">
+        <div class="p-6 border-b border-sky-200/70">
+            <div class="flex items-center gap-2.5">
+                <span class="w-8 h-8 rounded-lg bg-[#0b4f7c] text-white flex items-center justify-center shadow-sm">
+                    <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 2v20M2 12h20M4.93 4.93l14.14 14.14M19.07 4.93L4.93 19.07"/>
+                    </svg>
+                </span>
+                <div>
+                    <h1 class="text-lg font-bold tracking-tight text-[#0c2238] leading-none">CryoSpawn</h1>
+                    <p class="text-[11px] font-medium text-[#486581] mt-1">Alpine Daylight Cloud</p>
+                </div>
+            </div>
+            <p class="text-xs font-medium text-[#0b4f7c] mt-3 bg-white/70 border border-sky-200/80 rounded-lg px-2.5 py-1.5" id="user-greeting">Loading...</p>
         </div>
-        <nav class="flex-1 px-4 py-6 space-y-2">
-            <a href="/dashboard" class="text-slate-400 hover:bg-slate-800 hover:text-white flex items-center px-4 py-2.5 rounded-lg transition-colors font-medium text-sm">💻 MicroVMs</a>
-            <a href="/volumes" class="text-slate-400 hover:bg-slate-800 hover:text-white flex items-center px-4 py-2.5 rounded-lg transition-colors font-medium text-sm">💾 Elastic Volumes</a>
-            <a href="/networks" class="bg-blue-600 text-white shadow-sm flex items-center px-4 py-2.5 rounded-lg transition-colors font-medium text-sm">🌐 Routing & Mesh</a>
-            <a href="/settings" class="text-slate-400 hover:bg-slate-800 hover:text-white flex items-center px-4 py-2.5 rounded-lg transition-colors font-medium text-sm">⚙️ Settings</a>
+        <nav class="flex-1 px-4 py-5 space-y-1.5" aria-label="Primary Navigation">
+            <a href="/dashboard" class="alpine-nav-item flex items-center gap-2.5 px-4 py-2.5 rounded-xl font-medium text-sm">
+                <span>❄️</span><span>Projects Overview</span>
+            </a>
+            <a href="/volumes" class="alpine-nav-item flex items-center gap-2.5 px-4 py-2.5 rounded-xl font-medium text-sm">
+                <span>💾</span><span>Elastic Volumes</span>
+            </a>
+            <a href="/networks" class="alpine-nav-active flex items-center gap-2.5 px-4 py-2.5 rounded-xl font-semibold text-sm">
+                <span>🌐</span><span>Routing &amp; Mesh</span>
+            </a>
+            <a href="/settings" class="alpine-nav-item flex items-center gap-2.5 px-4 py-2.5 rounded-xl font-medium text-sm">
+                <span>⚙️</span><span>Settings</span>
+            </a>
         </nav>
-        <div class="p-4 border-t border-slate-800">
-            <button onclick="logout()" class="w-full flex items-center justify-center px-4 py-2 bg-slate-800 hover:bg-red-600 rounded-lg transition-colors text-sm font-medium">Logout</button>
+        <div class="p-4 border-t border-sky-200/70">
+            <button onclick="logout()" class="alpine-btn-ghost w-full flex items-center justify-center px-4 py-2 rounded-xl text-sm font-semibold text-rose-700 hover:bg-rose-50 hover:border-rose-300">
+                Logout
+            </button>
         </div>
     </aside>
 
     <!-- Main Content -->
-    <main class="flex-1 flex flex-col overflow-y-auto">
-        <header class="bg-white border-b border-slate-200 px-8 py-5 flex items-center justify-between md:hidden">
-            <h1 class="text-lg font-bold">CryoSpawn</h1>
-            <button onclick="logout()" class="text-sm font-medium text-red-600">Logout</button>
+    <main class="alpine-shell flex-1 flex flex-col overflow-y-auto min-w-0">
+        <!-- Mobile Header & Navigation -->
+        <header class="alpine-mobile-header px-4 py-3.5 md:hidden shrink-0">
+            <div class="flex items-center justify-between gap-2">
+                <div class="flex items-center gap-2 min-w-0">
+                    <span class="w-7 h-7 rounded-lg bg-[#0b4f7c] text-white flex items-center justify-center text-xs font-bold shrink-0">❄️</span>
+                    <h1 class="text-base font-bold text-[#0c2238] truncate">CryoSpawn</h1>
+                </div>
+                <div class="flex items-center gap-2 shrink-0">
+                    <button type="button" onclick="toggleMobileNav()" aria-label="Toggle navigation" class="alpine-btn-ghost px-3 py-1.5 rounded-lg text-xs font-semibold">
+                        Menu
+                    </button>
+                    <button type="button" onclick="logout()" class="px-3 py-1.5 rounded-lg text-xs font-semibold text-rose-700 bg-rose-50 border border-rose-200">
+                        Logout
+                    </button>
+                </div>
+            </div>
+            <nav id="mobile-nav-drawer" class="hidden mt-3 pt-3 border-t border-sky-200/70 grid grid-cols-2 gap-2" aria-label="Mobile Navigation">
+                <a href="/dashboard" class="alpine-nav-item bg-white/70 border border-sky-200/70 px-3 py-2 rounded-lg text-xs font-semibold text-center">❄️ Projects</a>
+                <a href="/volumes" class="alpine-nav-item bg-white/70 border border-sky-200/70 px-3 py-2 rounded-lg text-xs font-semibold text-center">💾 Volumes</a>
+                <a href="/networks" class="alpine-nav-active px-3 py-2 rounded-lg text-xs font-semibold text-center">🌐 Routing</a>
+                <a href="/settings" class="alpine-nav-item bg-white/70 border border-sky-200/70 px-3 py-2 rounded-lg text-xs font-semibold text-center">⚙️ Settings</a>
+            </nav>
         </header>
-        
-        <div class="p-8 max-w-6xl mx-auto w-full">
-            <div class="mb-8">
-                <h2 class="text-2xl font-bold text-slate-800">Network Topology</h2>
-                <p class="text-slate-500 text-sm mt-1">Configure microsegmentation and routing.</p>
-            </div>
-            
-            
-<div class="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
-    <div class="px-6 py-4 border-b border-slate-200 bg-slate-50">
-        <h2 class="text-lg font-semibold text-slate-800">Software-Defined Routing Table</h2>
-        <p class="text-xs text-slate-500 mt-0.5">Explicitly route traffic between VMs in the same project or across opted-in projects</p>
-    </div>
-    <div class="p-6">
-        <form id="link-form" class="flex flex-wrap items-center gap-3 pb-6 border-b border-slate-100">
-            <div class="flex-1 min-w-[140px]">
-                <label class="block text-xs font-medium text-slate-600 mb-1">Source VM</label>
-                <select id="link-vm1" required class="w-full border border-slate-300 rounded-md px-3 py-2 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-blue-500"></select>
-            </div>
-            <div class="pt-5 text-slate-400 font-bold">⟷</div>
-            <div class="flex-1 min-w-[140px]">
-                <label class="block text-xs font-medium text-slate-600 mb-1">Destination VM</label>
-                <select id="link-vm2" required class="w-full border border-slate-300 rounded-md px-3 py-2 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-blue-500"></select>
-            </div>
-            <div class="pt-5">
-                <button type="submit" id="link-btn" class="bg-blue-600 hover:bg-blue-700 text-white font-medium px-4 py-2 rounded-md text-sm transition-colors">
-                    Bridge Link
-                </button>
-            </div>
-        </form>
-        <div class="mt-4">
-            <h3 class="text-xs font-semibold uppercase tracking-wider text-slate-400 mb-3">Active Interconnects</h3>
-            <div id="links-container" class="space-y-2">
-                <p class="text-xs text-slate-400 italic">No custom routes active. VMs are currently isolated.</p>
-            </div>
-        </div>
-    </div>
-</div>
 
-<div class="mt-8 bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
-    <div class="px-6 py-4 border-b border-slate-200 bg-slate-50 flex justify-between items-center">
-        <div>
-            <h3 class="text-base font-semibold text-slate-800">Inter-Project Routing Permissions</h3>
-            <p class="text-xs text-slate-500 mt-0.5">Control whether individual MicroVMs can communicate across project boundaries</p>
-        </div>
-    </div>
-    <div class="p-6">
-        <div id="routing-permissions-container" class="space-y-3">
-            <p class="text-xs text-slate-400 italic">No MicroVMs available.</p>
-        </div>
-    </div>
-</div>
+        <div class="p-5 sm:p-8 max-w-6xl mx-auto w-full space-y-6">
+            <div>
+                <h2 class="text-2xl sm:text-3xl font-bold text-[#0c2238] tracking-tight">Network Topology</h2>
+                <p class="text-[#486581] text-sm mt-1">Configure zero-trust microsegmentation bridges and cross-project routing.</p>
+            </div>
 
+            <div id="daemon-status-banner" class="hidden alpine-card border-amber-300 bg-amber-50/90 px-4 py-3 rounded-xl text-xs font-medium text-amber-900">
+                Hypervisor daemon unreachable — live network routing and MicroVM telemetry require the CryoSpawn daemon to be online.
+            </div>
+
+            <div class="alpine-card rounded-2xl overflow-hidden">
+                <div class="alpine-card-header px-6 py-4">
+                    <h3 class="text-base font-bold text-[#0c2238]">Software-Defined Routing Table</h3>
+                    <p class="text-xs text-[#486581] mt-0.5">Explicitly route traffic between VMs in the same project or across opted-in projects.</p>
+                </div>
+                <div class="p-5 sm:p-6">
+                    <form id="link-form" class="flex flex-wrap items-end gap-3 pb-6 border-b border-sky-200/70">
+                        <div class="flex-1 min-w-[160px] max-w-full">
+                            <label for="link-vm1" class="block text-xs font-semibold text-[#1e3a52] mb-1">Source VM</label>
+                            <select id="link-vm1" required class="alpine-input w-full max-w-full rounded-lg px-3 py-2 text-sm"></select>
+                        </div>
+                        <div class="pb-2 text-[#0b4f7c] font-bold hidden sm:block">⟷</div>
+                        <div class="flex-1 min-w-[160px] max-w-full">
+                            <label for="link-vm2" class="block text-xs font-semibold text-[#1e3a52] mb-1">Destination VM</label>
+                            <select id="link-vm2" required class="alpine-input w-full max-w-full rounded-lg px-3 py-2 text-sm"></select>
+                        </div>
+                        <div>
+                            <button type="submit" id="link-btn" class="alpine-btn-primary font-semibold px-5 py-2 rounded-lg text-sm">
+                                Bridge Link
+                            </button>
+                        </div>
+                    </form>
+                    <div class="mt-5">
+                        <h4 class="text-xs font-bold uppercase tracking-wider text-[#486581] mb-3">Active Interconnects</h4>
+                        <div id="links-container" class="space-y-2">
+                            <p class="text-xs text-[#486581] italic">No custom routes active. VMs are currently isolated.</p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="alpine-card rounded-2xl overflow-hidden">
+                <div class="alpine-card-header px-6 py-4 flex justify-between items-center">
+                    <div>
+                        <h3 class="text-base font-bold text-[#0c2238]">Inter-Project Routing Permissions</h3>
+                        <p class="text-xs text-[#486581] mt-0.5">Control whether individual MicroVMs can communicate across project boundaries.</p>
+                    </div>
+                </div>
+                <div class="p-5 sm:p-6">
+                    <div id="routing-permissions-container" class="space-y-3">
+                        <p class="text-xs text-[#486581] italic">No MicroVMs available.</p>
+                    </div>
+                </div>
+            </div>
         </div>
     </main>
 
@@ -92,7 +157,7 @@
                 const res = await fetch('/api/auth/me');
                 if (!res.ok) { window.location.href = '/login'; return; }
                 const data = await res.json();
-                document.getElementById('user-greeting').innerText = `Welcome, ${data.username}`;
+                document.getElementById('user-greeting').innerText = `Signed in as ${data.username}`;
             } catch (e) {
                 window.location.href = '/login';
             }
@@ -104,6 +169,6 @@
             window.location.href = '/login';
         }
     </script>
-    <script src="app.js"></script>
+    <script src="/app.js"></script>
 </body>
 </html>
