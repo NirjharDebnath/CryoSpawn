@@ -5,11 +5,13 @@ import requests
 import os
 import re
 import json
+import secrets
 
 app = Flask(__name__, static_folder='../internal/ui')
-app.secret_key = os.environ.get('CRYOSPAWN_SECRET_KEY', 'super-secret-cryo-key-replace-in-prod')
+app.secret_key = os.environ.get('CRYOSPAWN_SECRET_KEY') or secrets.token_hex(32)
 BACKEND_PORT = os.environ.get('CRYOSPAWN_BACKEND_PORT', '9090')
 BACKEND_URL = os.environ.get('CRYOSPAWN_BACKEND_URL', f'http://127.0.0.1:{BACKEND_PORT}')
+INTERNAL_SECRET = os.environ.get('CRYOSPAWN_INTERNAL_SECRET', '')
 DB_PATH = os.environ.get('CRYOSPAWN_DB_PATH', os.path.abspath(os.path.join(os.path.dirname(__file__), '../cryospawn.db')))
 
 PROJECT_NAME_RE = re.compile(r'^[A-Za-z0-9][A-Za-z0-9._ -]{0,63}\Z')
@@ -421,6 +423,8 @@ def proxy_api(path):
     # INJECT TRUSTED HEADERS
     headers['X-User-ID'] = str(session['user_id'])
     headers['X-Role'] = session['role']
+    if INTERNAL_SECRET:
+        headers['X-Internal-Secret'] = INTERNAL_SECRET
 
     try:
         resp = requests.request(
@@ -428,9 +432,8 @@ def proxy_api(path):
             url=url,
             headers=headers,
             data=raw_body,
-            cookies=request.cookies,
             allow_redirects=False,
-            timeout=60
+            timeout=15
         )
         return Response(
             resp.content,

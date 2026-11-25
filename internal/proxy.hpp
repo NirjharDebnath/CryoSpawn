@@ -12,6 +12,7 @@
 #include <map>
 #include <mutex>
 #include <vector>
+#include <atomic>
 
 // Forward declare callbacks
 using WakeCallback = std::function<bool(int)>;
@@ -19,6 +20,13 @@ using StatusCallback = std::function<bool(int)>;
 
 inline std::mutex proxy_registry_mutex;
 inline std::map<std::string, int> active_proxies;
+inline std::atomic<int> active_proxy_connections{0};
+constexpr int MAX_PROXY_CONNECTIONS = 128;
+
+struct ProxyConnGuard {
+    ProxyConnGuard() { active_proxy_connections.fetch_add(1, std::memory_order_relaxed); }
+    ~ProxyConnGuard() { active_proxy_connections.fetch_sub(1, std::memory_order_relaxed); }
+};
 
 inline void relay_half(int src_fd, int dst_fd) {
     char buffer[16384];
@@ -40,6 +48,7 @@ end:
 }
 
 inline void handle_proxy_client(int client_sock, std::string vm_ip, int vm_port, int vm_id, WakeCallback wake_fn, StatusCallback status_fn) {
+    ProxyConnGuard conn_guard;
     // 1. Is the VM hibernated or stopped? If so, wake or boot it!
     if (status_fn(vm_id)) {
         std::cout << "[Ghost Proxy] Traffic detected! Waking/starting VM " << vm_id << "...\n";
@@ -182,6 +191,10 @@ inline void run_ghost_proxy(const std::string& uds_path, std::string vm_ip, int 
         if (client_sock < 0) {
             break; // Socket was closed, terminate listener thread
         }
+        if (active_proxy_connections.load(std::memory_order_relaxed) >= MAX_PROXY_CONNECTIONS) {
+            close(client_sock);
+            continue;
+        }
         std::thread(handle_proxy_client, client_sock, vm_ip, vm_port, vm_id, wake_fn, status_fn).detach();
     }
 }
@@ -221,6 +234,10 @@ inline void run_ghost_proxy_tcp(int host_port, std::string vm_ip, int vm_port, i
         int client_sock = accept(server_fd, nullptr, nullptr);
         if (client_sock < 0) {
             break;
+        }
+        if (active_proxy_connections.load(std::memory_order_relaxed) >= MAX_PROXY_CONNECTIONS) {
+            close(client_sock);
+            continue;
         }
         std::thread(handle_proxy_client, client_sock, vm_ip, vm_port, vm_id, wake_fn, status_fn).detach();
     }

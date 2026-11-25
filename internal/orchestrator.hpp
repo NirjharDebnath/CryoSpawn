@@ -62,6 +62,46 @@ private:
         return id;
     }
 
+    static int run_exec(const std::vector<std::string>& args, bool silence_output = false) {
+        if (args.empty()) return -1;
+        pid_t pid = fork();
+        if (pid < 0) return -1;
+        if (pid == 0) {
+            if (silence_output) {
+                int dev_null = open("/dev/null", O_RDWR);
+                if (dev_null >= 0) {
+                    dup2(dev_null, STDOUT_FILENO);
+                    dup2(dev_null, STDERR_FILENO);
+                    close(dev_null);
+                }
+            }
+            std::vector<char*> argv;
+            argv.reserve(args.size() + 1);
+            for (const auto& a : args) {
+                argv.push_back(const_cast<char*>(a.c_str()));
+            }
+            argv.push_back(nullptr);
+            execvp(argv[0], argv.data());
+            _exit(127);
+        }
+        int status = 0;
+        if (waitpid(pid, &status, 0) < 0) return -1;
+        return WIFEXITED(status) ? WEXITSTATUS(status) : -1;
+    }
+
+    std::vector<std::string> collect_peer_taps_locked(int vm_id) {
+        std::vector<std::string> peer_taps;
+        auto links = db.get_all_links();
+        for (const auto& link : links) {
+            if (link.vm1_id == vm_id && vms.count(link.vm2_id)) {
+                peer_taps.push_back(vms[link.vm2_id].tap_name);
+            } else if (link.vm2_id == vm_id && vms.count(link.vm1_id)) {
+                peer_taps.push_back(vms[link.vm1_id].tap_name);
+            }
+        }
+        return peer_taps;
+    }
+
 public:
     static std::string generate_mac(int slot) {
         int base = slot * 4;
@@ -112,12 +152,10 @@ public:
     }
 
     // Sweeps up network taps, sockets, disk images, snapshots, and ghost proxies
-    void cleanup_vm_resources(MicroVM& vm) {
+    void cleanup_vm_resources(const MicroVM& vm, const std::vector<std::string>& peer_taps = {}) {
         std::cout << "[*] Cleaning up resources for VM " << vm.id << " (" << vm.uuid << ")...\n";
-        auto links = db.get_all_links();
-        for (const auto& link : links) {
-            if (link.vm1_id == vm.id && vms.count(link.vm2_id)) unlink_taps(vm.tap_name, vms[link.vm2_id].tap_name);
-            if (link.vm2_id == vm.id && vms.count(link.vm1_id)) unlink_taps(vm.tap_name, vms[link.vm1_id].tap_name);
+        for (const auto& peer_tap : peer_taps) {
+            unlink_taps(vm.tap_name, peer_tap);
         }
         teardown_cryo_network(vm.tap_name, active_iface);
         if (vm.ssh_exposed && vm.host_port > 0) {
@@ -217,51 +255,64 @@ public:
     void start_reaper() {
         std::thread([this]() {
             while (true) {
-                int status;
-                pid_t pid;
-                // Drain all terminated child processes without blocking
-                while ((pid = waitpid(-1, &status, WNOHANG)) > 0) {
-                    std::lock_guard<std::mutex> lock(mtx);
-                    if (pid_to_slot.find(pid) != pid_to_slot.end()) {
-                        int slot = pid_to_slot[pid];
-                        if (vms.find(slot) != vms.end()) {
-                            if (vms[slot].status == "hibernated" || vms[slot].status == "restarting" || vms[slot].status == "stopped") {
-                                vms[slot].pid = 0;
-                                pid_to_slot.erase(pid);
-                            } else {
-                                cleanup_vm_resources(vms[slot]);
-                                active_uuids.erase(vms[slot].uuid);
-                                vms.erase(slot);
-                                pid_to_slot.erase(pid);
-                            }
-                        } else {
-                            pid_to_slot.erase(pid);
-                        }
-                    }
-                }
-
-                // Check for adopted processes or externally killed processes that exited
-                std::vector<int> dead_slots;
+                std::vector<std::pair<MicroVM, std::vector<std::string>>> to_cleanup;
                 {
                     std::lock_guard<std::mutex> lock(mtx);
-                    for (auto& pair : vms) {
+                    std::vector<pid_t> tracked_pids;
+                    tracked_pids.reserve(pid_to_slot.size());
+                    for (const auto& kv : pid_to_slot) {
+                        tracked_pids.push_back(kv.first);
+                    }
+
+                    for (pid_t pid : tracked_pids) {
+                        int status = 0;
+                        if (waitpid(pid, &status, WNOHANG) > 0) {
+                            auto pit = pid_to_slot.find(pid);
+                            if (pit == pid_to_slot.end()) continue;
+                            int slot = pit->second;
+                            auto vit = vms.find(slot);
+                            if (vit != vms.end()) {
+                                if (vit->second.status == "hibernated" || vit->second.status == "restarting" || vit->second.status == "stopped") {
+                                    vit->second.pid = 0;
+                                    pid_to_slot.erase(pit);
+                                } else {
+                                    auto peer_taps = collect_peer_taps_locked(slot);
+                                    to_cleanup.push_back({vit->second, std::move(peer_taps)});
+                                    active_uuids.erase(vit->second.uuid);
+                                    vms.erase(vit);
+                                    pid_to_slot.erase(pit);
+                                }
+                            } else {
+                                pid_to_slot.erase(pit);
+                            }
+                        }
+                    }
+
+                    // Check for adopted processes or externally killed processes that exited
+                    std::vector<int> dead_slots;
+                    for (const auto& pair : vms) {
                         const std::string& st = pair.second.status;
-                        if (st == "hibernated" || st == "stopped" || st == "restarting" || st == "booting" || st == "waking") {
+                        if (st == "hibernated" || st == "stopped" || st == "restarting" || st == "booting" || st == "waking" || st == "terminating") {
                             continue;
                         }
                         if (pair.second.pid > 0 && kill(pair.second.pid, 0) != 0) {
                             dead_slots.push_back(pair.first);
                         }
                     }
-                }
-                for (int slot : dead_slots) {
-                    std::lock_guard<std::mutex> lock(mtx);
-                    if (vms.find(slot) != vms.end()) {
-                        pid_to_slot.erase(vms[slot].pid);
-                        cleanup_vm_resources(vms[slot]);
-                        active_uuids.erase(vms[slot].uuid);
-                        vms.erase(slot);
+                    for (int slot : dead_slots) {
+                        auto vit = vms.find(slot);
+                        if (vit != vms.end()) {
+                            pid_to_slot.erase(vit->second.pid);
+                            auto peer_taps = collect_peer_taps_locked(slot);
+                            to_cleanup.push_back({vit->second, std::move(peer_taps)});
+                            active_uuids.erase(vit->second.uuid);
+                            vms.erase(vit);
+                        }
                     }
+                }
+
+                for (const auto& item : to_cleanup) {
+                    cleanup_vm_resources(item.first, item.second);
                 }
                 std::this_thread::sleep_for(std::chrono::seconds(1));
             }
@@ -365,9 +416,9 @@ public:
                 std::filesystem::copy(base_path, vm_rootfs);
                 if (vm.rootfs_gb >= 3) {
                     std::cout << "[*] Expanding rootfs to " << vm.rootfs_gb << "GB...\n";
-                    system(("truncate -s " + std::to_string(vm.rootfs_gb) + "G \"" + vm_rootfs.string() + "\"").c_str());
-                    system(("e2fsck -fy \"" + vm_rootfs.string() + "\" > /dev/null 2>&1").c_str());
-                    system(("resize2fs \"" + vm_rootfs.string() + "\" > /dev/null 2>&1").c_str());
+                    run_exec({"truncate", "-s", std::to_string(vm.rootfs_gb) + "G", vm_rootfs.string()});
+                    run_exec({"e2fsck", "-fy", vm_rootfs.string()}, true);
+                    run_exec({"resize2fs", vm_rootfs.string()}, true);
                 }
             }
         } catch (const std::exception& e) {
@@ -400,10 +451,20 @@ public:
         std::string machine_payload = "{\"vcpu_count\": " + std::to_string(vm.vcpus) + ", \"mem_size_mib\": " + std::to_string(vm.mem_mib) + "}";
         if (!send_firecracker_put(vm.socket_path, "/machine-config", machine_payload)) { terminate_vm(id); return false; }
 
+        {
+            std::lock_guard<std::mutex> lock(mtx);
+            if (vms.find(id) == vms.end() || vms[id].status == "terminating") {
+                return false;
+            }
+        }
+
         if (!send_firecracker_put(vm.socket_path, "/actions", "{\"action_type\": \"InstanceStart\"}")) { terminate_vm(id); return false; }
 
         { 
             std::lock_guard<std::mutex> lock(mtx);
+            if (vms.find(id) == vms.end() || vms[id].status == "terminating") {
+                return false;
+            }
             vms[id].status = "running";
             db.update_status(id, "running");
         }
@@ -474,12 +535,25 @@ public:
     }
 
     void terminate_vm(int id) {
-        std::lock_guard<std::mutex> lock(mtx);
-        if (vms.find(id) == vms.end()) return;
-        
-        vms[id].status = "terminating";
-        db.update_status(id, "terminating");
-        pid_t pid = vms[id].pid;
+        MicroVM vm_copy;
+        std::vector<std::string> peer_taps;
+        pid_t pid = 0;
+        {
+            std::lock_guard<std::mutex> lock(mtx);
+            auto it = vms.find(id);
+            if (it == vms.end()) return;
+            it->second.status = "terminating";
+            db.update_status(id, "terminating");
+            pid = it->second.pid;
+            vm_copy = it->second;
+            peer_taps = collect_peer_taps_locked(id);
+            if (pid > 0) {
+                pid_to_slot.erase(pid);
+            }
+            active_uuids.erase(it->second.uuid);
+            vms.erase(it);
+        }
+
         if (pid > 0) {
             kill(pid, SIGKILL);
             for (int i = 0; i < 25; ++i) {
@@ -489,11 +563,8 @@ public:
                 }
                 std::this_thread::sleep_for(std::chrono::milliseconds(10));
             }
-            pid_to_slot.erase(pid);
         }
-        cleanup_vm_resources(vms[id]);
-        active_uuids.erase(vms[id].uuid);
-        vms.erase(id);
+        cleanup_vm_resources(vm_copy, peer_taps);
     }
 
     bool hibernate_vm(int id) {
@@ -640,11 +711,8 @@ public:
         int vol_id = db.insert_volume(name, size_gb, owner_id);
         std::string vol_path = config::BASE_PATH + "/volumes/vol_" + std::to_string(vol_id) + ".ext4";
         
-        std::string cmd1 = "truncate -s " + std::to_string(size_gb) + "G \"" + vol_path + "\"";
-        std::string cmd2 = "mkfs.ext4 -F \"" + vol_path + "\" > /dev/null 2>&1";
-        
-        system(cmd1.c_str());
-        system(cmd2.c_str());
+        run_exec({"truncate", "-s", std::to_string(size_gb) + "G", vol_path});
+        run_exec({"mkfs.ext4", "-F", vol_path}, true);
         
         return vol_id;
     }
@@ -653,6 +721,15 @@ public:
         std::string vol_path = config::BASE_PATH + "/volumes/vol_" + std::to_string(vol_id) + ".ext4";
         unlink(vol_path.c_str());
         db.remove_volume(vol_id);
+    }
+
+    bool delete_volume_if_unattached(int vol_id) {
+        if (!db.remove_volume_if_unattached(vol_id)) {
+            return false;
+        }
+        std::string vol_path = config::BASE_PATH + "/volumes/vol_" + std::to_string(vol_id) + ".ext4";
+        unlink(vol_path.c_str());
+        return true;
     }
 
     std::vector<MicroVM> list_vms(int user_id = 1, bool is_admin = true) {

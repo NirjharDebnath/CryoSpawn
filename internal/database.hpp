@@ -6,11 +6,13 @@
 #include <iostream>
 #include <sys/stat.h>
 #include <algorithm>
+#include <mutex>
 #include "config.hpp"
 
 class Database {
 private:
     sqlite3* db = nullptr;
+    mutable std::recursive_mutex db_mtx;
 
     inline std::string col_text(sqlite3_stmt* stmt, int col) {
         const unsigned char* txt = sqlite3_column_text(stmt, col);
@@ -18,6 +20,7 @@ private:
     }
 
     void execute_query(const std::string& sql) {
+        std::lock_guard<std::recursive_mutex> lock(db_mtx);
         char* err_msg = nullptr;
         if (sqlite3_exec(db, sql.c_str(), nullptr, nullptr, &err_msg) != SQLITE_OK) {
             std::string err = err_msg ? err_msg : "Unknown SQLite error";
@@ -113,13 +116,17 @@ public:
     struct LinkRow { int vm1_id; int vm2_id; };
 
     std::vector<DBRow> get_all_vms(int user_id = 1, bool is_admin = true) {
+        std::lock_guard<std::recursive_mutex> lock(db_mtx);
         std::vector<DBRow> rows;
-        const char* sql = "SELECT slot_id, pid, status, vcpus, mem_mib, guest_ip, host_ip, tap_name, ssh_exposed, host_port, project_name, http_exposed, https_exposed, rootfs_gb, uuid, name, owner_id, allow_interproject_routing, mac FROM vms WHERE owner_id = ? OR ? = 1;";
+        const char* sql = is_admin
+            ? "SELECT slot_id, pid, status, vcpus, mem_mib, guest_ip, host_ip, tap_name, ssh_exposed, host_port, project_name, http_exposed, https_exposed, rootfs_gb, uuid, name, owner_id, allow_interproject_routing, mac FROM vms;"
+            : "SELECT slot_id, pid, status, vcpus, mem_mib, guest_ip, host_ip, tap_name, ssh_exposed, host_port, project_name, http_exposed, https_exposed, rootfs_gb, uuid, name, owner_id, allow_interproject_routing, mac FROM vms WHERE owner_id = ?;";
         sqlite3_stmt* stmt;
         
         if (sqlite3_prepare_v2(db, sql, -1, &stmt, nullptr) == SQLITE_OK) {
-            sqlite3_bind_int(stmt, 1, user_id);
-            sqlite3_bind_int(stmt, 2, is_admin ? 1 : 0);
+            if (!is_admin) {
+                sqlite3_bind_int(stmt, 1, user_id);
+            }
             while (sqlite3_step(stmt) == SQLITE_ROW) {
                 DBRow r;
                 r.slot = sqlite3_column_int(stmt, 0);
@@ -322,11 +329,15 @@ public:
     }
 
     std::vector<LinkRow> get_all_links(int user_id = 1, bool is_admin = true) {
+        std::lock_guard<std::recursive_mutex> lock(db_mtx);
         std::vector<LinkRow> links; sqlite3_stmt* stmt;
-        const char* sql = "SELECT vm1_id, vm2_id FROM network_links WHERE owner_id = ? OR ? = 1;";
+        const char* sql = is_admin
+            ? "SELECT vm1_id, vm2_id FROM network_links;"
+            : "SELECT vm1_id, vm2_id FROM network_links WHERE owner_id = ?;";
         if (sqlite3_prepare_v2(db, sql, -1, &stmt, nullptr) == SQLITE_OK) {
-            sqlite3_bind_int(stmt, 1, user_id);
-            sqlite3_bind_int(stmt, 2, is_admin ? 1 : 0);
+            if (!is_admin) {
+                sqlite3_bind_int(stmt, 1, user_id);
+            }
             while (sqlite3_step(stmt) == SQLITE_ROW) {
                 links.push_back({sqlite3_column_int(stmt, 0), sqlite3_column_int(stmt, 1)});
             }
@@ -342,6 +353,7 @@ public:
 
     // --- Volumes ---
     int insert_volume(const std::string& name, int size_gb, int owner_id = 1) {
+        std::lock_guard<std::recursive_mutex> lock(db_mtx);
         const char* sql = "INSERT INTO volumes (name, size_gb, owner_id) VALUES (?, ?, ?);";
         sqlite3_stmt* stmt;
         if (sqlite3_prepare_v2(db, sql, -1, &stmt, nullptr) == SQLITE_OK) {
@@ -355,6 +367,7 @@ public:
     }
 
     void remove_volume(int id) {
+        std::lock_guard<std::recursive_mutex> lock(db_mtx);
         sqlite3_stmt* stmt;
         if (sqlite3_prepare_v2(db, "DELETE FROM volumes WHERE id = ?;", -1, &stmt, nullptr) == SQLITE_OK) {
             sqlite3_bind_int(stmt, 1, id);
@@ -363,7 +376,22 @@ public:
         }
     }
 
+    bool remove_volume_if_unattached(int id) {
+        std::lock_guard<std::recursive_mutex> lock(db_mtx);
+        sqlite3_stmt* stmt;
+        bool deleted = false;
+        if (sqlite3_prepare_v2(db, "DELETE FROM volumes WHERE id = ? AND attached_vm_id = -1;", -1, &stmt, nullptr) == SQLITE_OK) {
+            sqlite3_bind_int(stmt, 1, id);
+            if (sqlite3_step(stmt) == SQLITE_DONE) {
+                deleted = (sqlite3_changes(db) > 0);
+            }
+            sqlite3_finalize(stmt);
+        }
+        return deleted;
+    }
+
     void attach_volume(int vol_id, int vm_id) {
+        std::lock_guard<std::recursive_mutex> lock(db_mtx);
         sqlite3_stmt* stmt;
         if (sqlite3_prepare_v2(db, "UPDATE volumes SET attached_vm_id = ? WHERE id = ?;", -1, &stmt, nullptr) == SQLITE_OK) {
             sqlite3_bind_int(stmt, 1, vm_id);
@@ -374,6 +402,7 @@ public:
     }
 
     void detach_volume(int vol_id) {
+        std::lock_guard<std::recursive_mutex> lock(db_mtx);
         sqlite3_stmt* stmt;
         if (sqlite3_prepare_v2(db, "UPDATE volumes SET attached_vm_id = -1 WHERE id = ?;", -1, &stmt, nullptr) == SQLITE_OK) {
             sqlite3_bind_int(stmt, 1, vol_id);
@@ -383,6 +412,7 @@ public:
     }
 
     void detach_all_volumes_from_vm(int vm_id) {
+        std::lock_guard<std::recursive_mutex> lock(db_mtx);
         sqlite3_stmt* stmt;
         if (sqlite3_prepare_v2(db, "UPDATE volumes SET attached_vm_id = -1 WHERE attached_vm_id = ?;", -1, &stmt, nullptr) == SQLITE_OK) {
             sqlite3_bind_int(stmt, 1, vm_id);
@@ -399,6 +429,7 @@ public:
     struct VolumeRow { int id; std::string name; int size_gb; int attached_vm_id; int owner_id; };
 
     bool get_volume(int vol_id, VolumeRow& vol) {
+        std::lock_guard<std::recursive_mutex> lock(db_mtx);
         const char* sql = "SELECT id, name, size_gb, attached_vm_id, owner_id FROM volumes WHERE id = ?;";
         sqlite3_stmt* stmt;
         bool found = false;
@@ -424,10 +455,15 @@ public:
     }
 
     std::vector<VolumeRow> get_volumes(int user_id = 1, bool is_admin = true) {
+        std::lock_guard<std::recursive_mutex> lock(db_mtx);
         std::vector<VolumeRow> vols; sqlite3_stmt* stmt;
-        if (sqlite3_prepare_v2(db, "SELECT id, name, size_gb, attached_vm_id, owner_id FROM volumes WHERE owner_id = ? OR ? = 1;", -1, &stmt, nullptr) == SQLITE_OK) {
-            sqlite3_bind_int(stmt, 1, user_id);
-            sqlite3_bind_int(stmt, 2, is_admin ? 1 : 0);
+        const char* sql = is_admin
+            ? "SELECT id, name, size_gb, attached_vm_id, owner_id FROM volumes;"
+            : "SELECT id, name, size_gb, attached_vm_id, owner_id FROM volumes WHERE owner_id = ?;";
+        if (sqlite3_prepare_v2(db, sql, -1, &stmt, nullptr) == SQLITE_OK) {
+            if (!is_admin) {
+                sqlite3_bind_int(stmt, 1, user_id);
+            }
             while (sqlite3_step(stmt) == SQLITE_ROW) {
                 vols.push_back({
                     sqlite3_column_int(stmt, 0),

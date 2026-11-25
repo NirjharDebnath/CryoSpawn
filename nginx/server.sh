@@ -14,14 +14,9 @@ server {
 }
 
 # 2. MicroVM Dynamic Ingress (HTTP Port 80)
-# Matches:
-#   - http://cryo-4f5fb332.cryo (local dashboard links)
-#   - http://4f5fb332.cryo (short form)
-#   - http://4f5fb332.yourdomain.com (Cloudflare tunnel ingress)
-#   - http://vm0.cryo (legacy numerical slot ID)
 server {
     listen 80;
-    server_name "~^(?:cryo-)?(?<vmhex>[a-f0-9]{8})\.(?<domain>.+)$" "~^vm(?<vmid>\d+)\.cryo$";
+    server_name "~^(?:cryo-)?(?<vmhex>[a-f0-9]{8})\.(?<domain>.+)$" ~^vm(?<vmid>\d+)\.cryo$;
 
     location / {
         set $sock "/tmp/cryo-${vmhex}_80.sock";
@@ -40,7 +35,7 @@ server {
 # 3. MicroVM Dynamic Ingress (HTTPS Port 443)
 server {
     listen 443;
-    server_name "~^(?:cryo-)?(?<vmhex>[a-f0-9]{8})\.(?<domain>.+)$" "~^vm(?<vmid>\d+)\.cryo$";
+    server_name "~^(?:cryo-)?(?<vmhex>[a-f0-9]{8})\.(?<domain>.+)$" ~^vm(?<vmid>\d+)\.cryo$;
 
     location / {
         set $sock "/tmp/cryo-${vmhex}_443.sock";

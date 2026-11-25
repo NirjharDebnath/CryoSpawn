@@ -76,7 +76,31 @@ struct ServerContext : public std::enable_shared_from_this<ServerContext> {
         }
     }
 
+    static bool is_valid_resource_name(const std::string& name) {
+        if (name.empty() || name.size() > 64) return false;
+        if (name.find("..") != std::string::npos || name.find('/') != std::string::npos || name.find('\\') != std::string::npos) {
+            return false;
+        }
+        bool has_non_space = false;
+        for (unsigned char c : name) {
+            if (std::isalnum(c) || c == '.' || c == '_' || c == '-') {
+                has_non_space = true;
+            } else if (c != ' ') {
+                return false;
+            }
+        }
+        return has_non_space;
+    }
+
     static bool authenticate(const httplib::Request& req, httplib::Response& res, int& user_id, bool& is_admin) {
+        const char* expected_secret = std::getenv("CRYOSPAWN_INTERNAL_SECRET");
+        if (expected_secret && std::strlen(expected_secret) > 0) {
+            if (!req.has_header("X-Internal-Secret") || req.get_header_value("X-Internal-Secret") != expected_secret) {
+                res.status = 401;
+                res.set_content(R"({"error": "Unauthorized. Invalid internal secret."})", "application/json");
+                return false;
+            }
+        }
         if (!req.has_header("X-User-ID")) {
             res.status = 401;
             res.set_content(R"({"error": "Unauthorized. Missing X-User-ID header."})", "application/json");
@@ -212,6 +236,21 @@ inline void register_routes(httplib::Server& svr, VMManager& manager, const std:
                 }
                 if (is_admin && req.has_param("all") && body.contains("owner_id") && body["owner_id"].is_number_integer() && body["owner_id"].get<int>() > 0) {
                     vm_owner = body["owner_id"].get<int>();
+                }
+                if (!name.empty() && !ServerContext::is_valid_resource_name(name)) {
+                    res.status = 400;
+                    res.set_content(R"({"error": "Invalid VM name. Use 1-64 characters: letters, numbers, spaces, '.', '_', or '-'."})", "application/json");
+                    return;
+                }
+                if (vcpus < 1 || vcpus > 32) {
+                    res.status = 400;
+                    res.set_content(R"({"error": "vcpus must be between 1 and 32."})", "application/json");
+                    return;
+                }
+                if (mem_mib < 128 || mem_mib > 65536) {
+                    res.status = 400;
+                    res.set_content(R"({"error": "mem_mib must be between 128 and 65536."})", "application/json");
+                    return;
                 }
                 if (rootfs_gb < 3) rootfs_gb = 3;
             } catch (...) {
@@ -737,7 +776,7 @@ inline void register_routes(httplib::Server& svr, VMManager& manager, const std:
             }
             std::string name = body.value("name", "");
             int size_gb = body.value("size_gb", 1);
-            if (name.empty() || size_gb < 1 || size_gb > 1000) {
+            if (!ServerContext::is_valid_resource_name(name) || size_gb < 1 || size_gb > 1000) {
                 res.status = 400;
                 res.set_content(json{{"error", "Invalid volume name or size (1-1000 GB)."}}.dump(), "application/json");
                 return;
@@ -774,12 +813,11 @@ inline void register_routes(httplib::Server& svr, VMManager& manager, const std:
                 res.set_content(json{{"error", "Forbidden: You do not own this volume."}}.dump(), "application/json");
                 return;
             }
-            if (vol.attached_vm_id != -1) {
+            if (!ctx->manager.delete_volume_if_unattached(vol_id)) {
                 res.status = 400;
                 res.set_content(json{{"error", "Cannot delete an attached volume. Please detach it first."}}.dump(), "application/json");
                 return;
             }
-            ctx->manager.delete_volume(vol_id);
             res.set_content(json{{"status", "deleted"}}.dump(), "application/json");
         } catch (const std::exception& e) {
             res.status = 400;
@@ -942,9 +980,10 @@ inline void register_routes(httplib::Server& svr, VMManager& manager, const std:
     });
 
     svr.set_post_routing_handler([](const httplib::Request&, httplib::Response& res) {
-        res.set_header("Access-Control-Allow-Origin", "*");
+        const char* cors_origin = std::getenv("CRYOSPAWN_CORS_ORIGIN");
+        res.set_header("Access-Control-Allow-Origin", (cors_origin && std::strlen(cors_origin) > 0) ? cors_origin : "http://127.0.0.1:8080");
         res.set_header("Access-Control-Allow-Methods", "GET, POST, PATCH, DELETE, OPTIONS");
-        res.set_header("Access-Control-Allow-Headers", "Content-Type, X-User-ID, X-Role");
+        res.set_header("Access-Control-Allow-Headers", "Content-Type, X-User-ID, X-Role, X-Internal-Secret");
     });
     svr.Options(".*", [](const httplib::Request&, httplib::Response& res) { res.status = 200; });
 }
