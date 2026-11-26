@@ -109,7 +109,7 @@
     <div class="section-head reveal">
       <div class="eyebrow">02 · Who does what</div>
       <h2>How the work is split</h2>
-      <p class="sub">A Flask frontend handles login and the dashboard. One root daemon holds the VM state and spawns small threads for each job. Each VM is a separate Firecracker process. The Linux kernel and Nginx do the packet work.</p>
+      <p class="sub">A Flask frontend handles login and the dashboard. The C++ daemon holds VM state and starts worker threads; it needs root privileges for TAP and firewall setup. Each VM is a separate Firecracker process. The Linux kernel routes packets, while Nginx is optional host-side ingress.</p>
     </div>
     <div class="row g-3">
       <div class="col-lg-4 col-md-6 reveal">
@@ -125,9 +125,9 @@
         <div class="panel work-card" style="--c:var(--ice)">
           <div class="kind">process · root</div>
           <h3><i class="bi bi-cpu"></i>cryospawn daemon</h3>
-          <div class="thread"><span class="spin"></span><div><b>HTTP server</b> <span class="n">httplib · 127.0.0.1:9090</span><br><span class="text-muted-2">Runs each REST handler. It trusts the X-User-ID and X-Role headers from Flask.</span></div></div>
+          <div class="thread"><span class="spin"></span><div><b>HTTP server</b> <span class="n">httplib · 127.0.0.1:9090</span><br><span class="text-muted-2">Runs REST handlers using X-User-ID and X-Role; CRYOSPAWN_INTERNAL_SECRET can require an additional shared-secret header.</span></div></div>
           <div class="thread"><span class="spin" style="--c:var(--run)"></span><div><b>configure_and_start</b> <span class="n">1 per create</span><br><span class="text-muted-2">Detached thread that configures Firecracker and boots the guest.</span></div></div>
-          <div class="thread"><span class="spin" style="--c:var(--wake)"></span><div><b>Reaper</b> <span class="n">1 · every 2 s</span><br><span class="text-muted-2">waitpid() + kill(pid, 0); cleans up dead VMs and keeps hibernated or restarting ones.</span></div></div>
+          <div class="thread"><span class="spin" style="--c:var(--wake)"></span><div><b>Reaper</b> <span class="n">1 · every 1 s</span><br><span class="text-muted-2">waitpid() + kill(pid, 0); cleans up dead VMs and keeps hibernated or restarting ones.</span></div></div>
           <div class="thread"><span class="spin" style="--c:var(--disk)"></span><div><b>VMManager mutex</b> <span class="n">shared</span><br><span class="text-muted-2">Serialises changes to the in-memory VM map and their SQLite writes.</span></div></div>
         </div>
       </div>
@@ -137,7 +137,7 @@
           <h3><i class="bi bi-shuffle"></i>Ghost Proxy</h3>
           <div class="thread"><span class="spin"></span><div><b>Listener</b> <span class="n">1 per exposed port</span><br><span class="text-muted-2">Owns /tmp/cryo-&lt;hex&gt;_P.sock (chmod 0666) and loops on accept().</span></div></div>
           <div class="thread"><span class="spin"></span><div><b>Client handler</b> <span class="n">1 per connection</span><br><span class="text-muted-2">Wakes the VM if it is hibernated, then connects to guest IP:port.</span></div></div>
-          <div class="thread"><span class="spin"></span><div><b>Relays</b> <span class="n">2 per connection</span><br><span class="text-muted-2">relay_data() copies bytes in each direction with an 8 KB buffer.</span></div></div>
+          <div class="thread"><span class="spin"></span><div><b>Relays</b> <span class="n">2 per connection</span><br><span class="text-muted-2">relay_half() copies bytes in each direction with a 16 KB buffer and propagates half-closes.</span></div></div>
         </div>
       </div>
       <div class="col-lg-4 col-md-6 reveal">
@@ -154,15 +154,15 @@
           <div class="kind">Linux kernel</div>
           <h3><i class="bi bi-shield-lock"></i>TAP + netfilter</h3>
           <div class="thread"><span class="spin"></span><div><b>TAP cryo-&lt;hex&gt;</b> <span class="n">1 per VM</span><br><span class="text-muted-2">Point-to-point /30 link between the host gateway and the guest.</span></div></div>
-          <div class="thread"><span class="spin"></span><div><b>iptables</b> <span class="n">baseline + links</span><br><span class="text-muted-2">NAT to the internet, DROP between VMs, 4 extra rules per link.</span></div></div>
+          <div class="thread"><span class="spin"></span><div><b>iptables</b> <span class="n">baseline + links</span><br><span class="text-muted-2">NAT to the internet; drops routed VM-subnet cross-talk by default. Each authorized link inserts 2 forwarding and 2 NAT rules.</span></div></div>
         </div>
       </div>
       <div class="col-lg-4 col-md-6 reveal">
         <div class="panel work-card" style="--c:var(--ice)">
           <div class="kind">process · host</div>
           <h3><i class="bi bi-signpost-split"></i>Nginx ingress</h3>
-          <div class="thread"><span class="spin"></span><div><b>cryo-&lt;hex&gt;.cryo</b> <span class="n">:80 and :443</span><br><span class="text-muted-2">A regex captures the hex part from the host name and proxies to that VM's Unix socket.</span></div></div>
-          <div class="thread"><span class="spin"></span><div><b>/etc/hosts</b> <span class="n">127.0.0.1</span><br><span class="text-muted-2">Points cryo-&lt;hex&gt;.cryo names at the local machine.</span></div></div>
+          <div class="thread"><span class="spin"></span><div><b>Optional Nginx ingress</b> <span class="n">:80 and :443</span><br><span class="text-muted-2">Host configuration can route UUID-based hostnames to the VM's Unix socket; the daemon does not configure DNS or public ingress.</span></div></div>
+          <div class="thread"><span class="spin"></span><div><b>Local name resolution</b> <span class="n">/etc/hosts or DNS</span><br><span class="text-muted-2">For local testing, map cryo-&lt;hex&gt;.cryo to 127.0.0.1. Public wildcard DNS and Cloudflare routing require separate setup.</span></div></div>
         </div>
       </div>
       <div class="col-lg-4 col-md-6 reveal">

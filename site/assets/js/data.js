@@ -15,7 +15,7 @@ CS.NODES = {
   api:     { x: 310, y: 300, label: "REST API",      sub: ":9090 · main.cpp", icon: "bi-braces",          c: "--ice", lamp: true },
   mgr:     { x: 520, y: 300, w: 150, label: "VMManager", sub: "orchestrator.hpp", icon: "bi-cpu",         c: "--ice" },
   db:      { x: 310, y: 450, label: "SQLite",        sub: "cryospawn.db",     icon: "bi-database",        c: "--disk" },
-  reaper:  { x: 510, y: 450, w: 165, label: "Reaper thread", sub: "waitpid() · 2 s", icon: "bi-recycle",  c: "--wake", lamp: true },
+  reaper:  { x: 510, y: 450, w: 165, label: "Reaper thread", sub: "waitpid() · 1 s", icon: "bi-recycle",  c: "--wake", lamp: true },
   nf:      { x: 700, y: 580, label: "Netfilter",     sub: "iptables · NAT",   icon: "bi-shield-lock",     c: "--net", lamp: true },
   tap0:    { x: 838, y: 240, w: 140, label: "cryo-<hex>", sub: "172.16.0.1/30",    icon: "bi-ethernet",        c: "--net"  },
   tap1:    { x: 838, y: 430, w: 140, label: "cryo-<hex>", sub: "172.16.0.5/30",    icon: "bi-ethernet",        c: "--net"  },
@@ -117,13 +117,13 @@ CS.SCENARIOS = [
     setup: { ready: { api: false, nf: false, reaper: false }, vm: { 0: "running", 1: "dead" }, tap: { 0: true, 1: true }, disk: { 0: true, 1: true } },
     steps: [
       { t: "VMManager() starts and finds the default network interface with ip route show default.", ref: "network.hpp · get_default_interface()", f: ["mgr"] },
-      { t: "Firewall baseline: ip_forward=1, MASQUERADE out of that interface, allow RELATED/ESTABLISHED, allow DNAT hairpin, DROP every other cryo+ → cryo+ packet, REJECT VM traffic to 192.168.0.0/16 and 10.0.0.0/8, and REJECT INPUT from cryo+ so a VM cannot reach the host.", ref: "network.hpp · init_cryo_firewall_baseline()", p: ["e-mgr-nf"], s: { ready: { nf: true } } },
+      { t: "Firewall baseline: ip_forward=1, MASQUERADE out of that interface, allow RELATED/ESTABLISHED and DNAT-marked cryo-to-cryo traffic, DROP other cryo-to-cryo traffic destined for 172.16.0.0/16, REJECT forwarding to 192.168.0.0/16 and 10.0.0.0/8, and REJECT new INPUT from cryo interfaces.", ref: "network.hpp · init_cryo_firewall_baseline()", p: ["e-mgr-nf"], s: { ready: { nf: true } } },
       { t: "Create the instances/ and volumes/ directories if they are missing.", ref: "orchestrator.hpp · VMManager()", p: ["e-mgr-vols"], f: ["inst", "vols"] },
       { t: "reconcile_state() reads every row of the vms table.", ref: "orchestrator.hpp · reconcile_state()", p: ["-e-mgr-db"] },
       { t: "VM 0: kill(pid, 0) succeeds, so the still-running Firecracker process is adopted back into memory.", ref: "orchestrator.hpp · reconcile_state()", p: ["e-mgr-vm0"], f: ["vm0"] },
       { t: "VM 1: its PID is gone, so the stale entry is cleaned up: TAP removed, disk and snapshot files deleted, socket files unlinked, DB row deleted.", ref: "orchestrator.hpp · cleanup_vm_resources()", p: [["e-mgr-nf", "e-nf-tap1"], "e-mgr-vm1", "e-mgr-db"], s: { vm: { 1: "absent" }, tap: { 1: false }, disk: { 1: false } } },
-      { t: "start_reaper() launches a background thread that polls waitpid() every 2 seconds.", ref: "orchestrator.hpp · start_reaper()", p: ["e-mgr-reaper"], s: { ready: { reaper: true } } },
-      { t: "main() starts a Ghost Proxy thread for each exposed port of every adopted VM.", ref: "main.cpp · main()", p: ["e-api-gh"], s: { sock: { 0: true } } },
+      { t: "start_reaper() launches a background thread that polls waitpid() every second.", ref: "orchestrator.hpp · start_reaper()", p: ["e-mgr-reaper"], s: { ready: { reaper: true } } },
+      { t: "register_routes() restores a Ghost Proxy listener for each exposed port of every adopted VM.", ref: "server.hpp · register_routes()", p: ["e-api-gh"], s: { sock: { 0: true } } },
       { t: "The HTTP server binds 127.0.0.1:9090 and serves the REST API only. The Flask frontend (python frontend/app.py) is a separate process that serves the dashboard on :8080.", ref: "main.cpp · svr.listen()", f: ["api"], s: { ready: { api: true } } }
     ]
   },
@@ -170,14 +170,14 @@ CS.SCENARIOS = [
     setup: Object.assign({}, RUN0, { vm: { 0: "hibernated" }, snap: { 0: true } }),
     steps: [
       { t: "The browser resolves cryo-da05a06c.cryo to 127.0.0.1 (/etc/hosts) and sends GET to Nginx on port 80.", ref: "DESIGN.md · Nginx ingress", p: ["e-br-ng"] },
-      { t: "server_name ~^cryo-(?<hex>[a-f0-9]+)\\.cryo$ captures da05a06c and proxy_pass sends it to unix:/tmp/cryo-da05a06c_80.sock.", ref: "nginx/server.sh", p: ["e-ng-uds"] },
+      { t: "The Nginx helper accepts cryo-<8 hex>.<domain> (and legacy vm<number>.cryo) hostnames, then routes the UUID hostname to /tmp/cryo-da05a06c_80.sock.", ref: "nginx/server.sh", p: ["e-ng-uds"] },
       { t: "The Ghost Proxy accept()s the connection and starts a handle_proxy_client thread.", ref: "proxy.hpp · run_ghost_proxy()", p: ["e-uds-gh"] },
       { t: "status_fn reports hibernated, so wake_fn calls wake_vm(slot 0).", ref: "proxy.hpp · handle_proxy_client()", p: ["e-gh-mgr"] },
       { t: "wake_vm marks the VM waking (blocking concurrent wakes) and forks a fresh Firecracker on /tmp/cryo-da05a06c.socket.", ref: "orchestrator.hpp · wake_vm()", p: ["e-mgr-db", "e-mgr-vm0"], s: { vm: { 0: "waking" } } },
       { t: "PUT /snapshot/load restores CPU state and memory from the snapshot files.", ref: "orchestrator.hpp · wake_vm()", p: ["-e-vm0-inst"] },
       { t: "PATCH /vm {state: Resumed}. Status becomes running.", ref: "orchestrator.hpp · wake_vm()", p: ["e-mgr-vm0", "e-mgr-db"], s: { vm: { 0: "running" } } },
-      { t: "The Ghost Proxy waits 600 ms, then connect()s to 172.16.0.2:80, retrying every 200 ms up to 50 times.", ref: "proxy.hpp · handle_proxy_client()", p: [["e-gh-tap0", "e-tap0-vm0"]] },
-      { t: "Two relay_data threads pipe bytes both ways. The response travels back along the same path.", ref: "proxy.hpp · relay_data()", p: [["-e-tap0-vm0", "-e-gh-tap0", "-e-uds-gh", "-e-ng-uds", "-e-br-ng"]] }
+      { t: "The Ghost Proxy waits 500 ms, then connect()s to 172.16.0.2:80, retrying every 200 ms up to 50 times.", ref: "proxy.hpp · handle_proxy_client()", p: [["e-gh-tap0", "e-tap0-vm0"]] },
+      { t: "Two relay_half() calls pipe bytes in both directions and propagate half-closes. The response travels back along the same path.", ref: "proxy.hpp · relay_half()", p: [["-e-tap0-vm0", "-e-gh-tap0", "-e-uds-gh", "-e-ng-uds", "-e-br-ng"]] }
     ]
   },
   {
@@ -234,7 +234,7 @@ CS.SCENARIOS = [
       { t: "ssh runs nc -U, which connects to the VM's port-22 Unix socket. No host TCP port is opened.", ref: "DESIGN.md · SSH via ProxyCommand", p: ["e-ssh-uds"] },
       { t: "The Ghost Proxy accept()s. status_fn is false (the VM is running), so no wake is needed.", ref: "proxy.hpp · handle_proxy_client()", p: ["e-uds-gh"] },
       { t: "connect() to 172.16.0.2:22 through the VM's TAP.", ref: "proxy.hpp · handle_proxy_client()", p: [["e-gh-tap0", "e-tap0-vm0"]] },
-      { t: "relay_data threads pipe the SSH session both ways until either side closes.", ref: "proxy.hpp · relay_data()", p: [["-e-tap0-vm0", "-e-gh-tap0", "-e-uds-gh", "-e-ssh-uds"]] }
+      { t: "Two relay_half() calls pipe the SSH session both ways and propagate half-closes.", ref: "proxy.hpp · relay_half()", p: [["-e-tap0-vm0", "-e-gh-tap0", "-e-uds-gh", "-e-ssh-uds"]] }
     ]
   },
   {
@@ -277,12 +277,12 @@ CS.SCENARIOS = [
   {
     id: "link", group: "Network", title: "Isolation, then linking", icon: "bi-link-45deg", c: "--run",
     trigger: "POST /api/links {vm1_id, vm2_id} (UUIDs)",
-    summary: "VMs cannot see each other by default. A link inserts four rules that open a path between two VMs of the same project.",
+    summary: "VMs cannot see each other by default. A link inserts four rules for VMs with the same owner; cross-project links additionally require both VMs to opt in.",
     setup: RUN01,
     steps: [
       { t: "VM 0 tries to reach VM 1. The baseline rule FORWARD -i cryo+ -o cryo+ -d 172.16.0.0/16 -j DROP blocks it.", ref: "network.hpp · init_cryo_firewall_baseline()", p: [{ e: "e-link", stop: 0.5, deny: true }] },
       { t: "The dashboard sends POST /api/links with the two VM UUIDs.", ref: "main.cpp · POST /api/links", p: ["e-dash-api"] },
-      { t: "link_microvms(): both VMs must exist and share a project; otherwise the API answers 400 \"Cross-project linking is denied\".", ref: "orchestrator.hpp · link_microvms()", p: ["e-api-mgr"] },
+      { t: "The API requires both VMs to share an owner. They must share a project, or both must have allow_interproject_routing enabled; cross-owner links are denied.", ref: "server.hpp · POST /api/links; orchestrator.hpp · link_microvms()", p: ["e-api-mgr"] },
       { t: "db.add_link() stores the ordered pair (INSERT OR IGNORE).", ref: "database.hpp · add_link()", p: ["e-mgr-db"] },
       { t: "link_taps(): FORWARD tap0 ⇄ tap1 ACCEPT and nat POSTROUTING MASQUERADE -o tap0 / -o tap1, all inserted at position 1.", ref: "network.hpp · link_taps()", p: ["e-mgr-nf"], s: { link: true } },
       { t: "VM 0 and VM 1 can now talk in both directions.", ref: "", p: [["e-link", "-e-link"]] }
