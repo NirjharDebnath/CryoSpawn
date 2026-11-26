@@ -19,7 +19,13 @@ CryoSpawn manages Firecracker MicroVMs, TAP devices and `iptables` rules, so it 
 | Uncompressed kernel (`vmlinux/ubuntu-vmlinux.bin`) | Guest kernel |
 | Template root disk (`rootfs/ubuntu-rootfs.ext4`) | Copied for every VM |
 
-The kernel and root disk are not part of the repository. You must provide them.
+The kernel and root disk are not part of the repository. Download them for a supported x86_64 or aarch64 host:
+
+```bash
+./utils/download_assets.sh
+```
+
+The script writes `vmlinux/ubuntu-vmlinux.bin` and `rootfs/ubuntu-rootfs.ext4`.
 
 ## 🗂️ Project layout on disk
 
@@ -72,6 +78,28 @@ The daemon:
 
 The frontend creates the `users` table, serves the dashboard on `0.0.0.0:8080` and forwards `/api/*` to the daemon.
 
+### Configuration
+
+| Variable or option | Default | Purpose |
+| :--- | :--- | :--- |
+| `CRYOSPAWN_BASE_PATH` | Directory containing the daemon binary | Project root |
+| `CRYOSPAWN_KERNEL_PATH` | `<base>/vmlinux/ubuntu-vmlinux.bin` | Guest kernel |
+| `CRYOSPAWN_ROOTFS_PATH` | `<base>/rootfs/ubuntu-rootfs.ext4` | Template root disk |
+| `CRYOSPAWN_DB_PATH` | `<base>/cryospawn.db` | Shared SQLite database |
+| `CRYOSPAWN_BACKEND_PORT` / `--port` | `9090` | Loopback daemon port |
+| `CRYOSPAWN_SECRET_KEY` | Random on every Flask start | Stable Flask session signing key |
+| `CRYOSPAWN_INTERNAL_SECRET` | Empty | Require a shared secret on daemon API requests |
+| `CRYOSPAWN_FRONTEND_PORT` | `8080` | Flask listen port |
+
+Set the internal secret in both processes when using the Flask proxy:
+
+```bash
+export CRYOSPAWN_INTERNAL_SECRET="$(openssl rand -hex 32)"
+export CRYOSPAWN_SECRET_KEY="$(openssl rand -hex 32)"
+sudo -E ./internal/cryospawn
+python frontend/app.py
+```
+
 ## 🔑 First login
 
 Open `http://localhost:8080`. You are redirected to `/login`.
@@ -81,7 +109,7 @@ Open `http://localhost:8080`. You are redirected to `/login`.
 | Username | `admin` |
 | Password | `admin123` |
 
-The account is created only when the `users` table is empty. The "Update Password" button on the Settings page is not wired to anything yet, so to change the password, write a new hash into the database:
+The account is created only when the `users` table is empty. Use the Settings page's password-change form, or update the account with SQLite:
 
 ```bash
 python - <<'PY'
@@ -94,7 +122,7 @@ PY
 ```
 
 > [!WARNING]
-> The Flask `secret_key` in `frontend/app.py` is a placeholder. Replace it before exposing the dashboard to anyone else. See [KNOWN-ISSUES.md](KNOWN-ISSUES.md).
+> Set `CRYOSPAWN_SECRET_KEY` and `CRYOSPAWN_INTERNAL_SECRET` before exposing the dashboard. The built-in Flask server is intended for development, not internet-facing production use. See [KNOWN-ISSUES.md](KNOWN-ISSUES.md).
 
 The dashboard has four pages: MicroVMs (`/dashboard`), Elastic Volumes (`/volumes`), Routing & Mesh (`/networks`) and Settings (`/settings`). You can also use the [HTTP API](API.md).
 

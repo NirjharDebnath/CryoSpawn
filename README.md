@@ -1,6 +1,6 @@
 # ❄️ CryoSpawn
 
-CryoSpawn is a MicroVM platform built on AWS Firecracker and Linux KVM. A C++17 daemon creates VMs and gives each one an isolated network. A small Flask frontend adds login and serves the web dashboard.
+CryoSpawn is a Linux MicroVM platform built on AWS Firecracker and Linux KVM. A C++17 daemon manages VM lifecycles and isolated networks; a Flask frontend provides authentication, projects, and the dashboard.
 
 ## ✨ Features
 
@@ -9,7 +9,8 @@ CryoSpawn is a MicroVM platform built on AWS Firecracker and Linux KVM. A C++17 
 - **No host port pollution:** SSH, HTTP and HTTPS are exposed through Unix Domain Sockets and a single Nginx ingress (`cryo-<hex>.cryo`).
 - **Zero-trust networking:** every VM has its own `/30` subnet and cannot reach other VMs unless you link them.
 - **UUIDs and names:** every VM has a name and a public ID like `vm-da05a06c`; the API, TAP devices, sockets and disk files all use it.
-- **Login and ownership:** the dashboard sits behind a session login, and the daemon tags VMs with an owner (multi-user support is still partial, see [known issues](docs/KNOWN-ISSUES.md)).
+- **Login and ownership:** Flask sessions identify users, and the daemon tags VMs and volumes with owners.
+- **Projects and routing:** VMs can be grouped into projects, with explicit opt-in for cross-project routing.
 - **Volumes and root disk sizing:** extra ext4 volumes can be attached to VMs, and each VM's root disk size is configurable.
 - **Persistence:** state lives in SQLite, so the daemon re-adopts running VMs after a restart.
 
@@ -17,8 +18,8 @@ CryoSpawn is a MicroVM platform built on AWS Firecracker and Linux KVM. A C++17 
 
 ```mermaid
 flowchart LR
-    UI[Browser dashboard / curl] -->|":8080 + session"| FL[Flask frontend]
-    FL -->|"127.0.0.1:9090 + X-User-ID"| D[CryoSpawn daemon]
+    UI[Browser dashboard / curl] -->|"8080 + session"| FL[Flask frontend]
+    FL -->|"127.0.0.1:9090 + trusted headers"| D[CryoSpawn daemon]
     Browser[Browser cryo-hex.cryo] --> N[Nginx]
     SSH[ssh via nc -U] --> S
     N --> S[Unix sockets /tmp/cryo-hex_*.sock]
@@ -36,12 +37,15 @@ flowchart LR
 cd internal
 g++ -std=c++17 main.cpp -o cryospawn -pthread -lsqlite3
 cd ..
+./utils/download_assets.sh
+python3 -m venv .venv
+. .venv/bin/activate
 pip install flask requests
-sudo ./internal/cryospawn      # terminal 1: daemon on 127.0.0.1:9090
-python frontend/app.py         # terminal 2: dashboard on :8080
+sudo -E ./internal/cryospawn
+python frontend/app.py
 ```
 
-Then open `http://localhost:8080` and sign in (first-start default: `admin` / `admin123`, change it right away). Prerequisites, the kernel and disk images you must provide, and the details are in the [setup guide](docs/SETUP.md).
+Run the daemon and frontend in separate terminals from the project root. Open `http://localhost:8080` and sign in with `admin` / `admin123` on the first start, then change the password. Prerequisites and full configuration are in [docs/SETUP.md](docs/SETUP.md).
 
 Create a VM from the command line:
 
@@ -58,7 +62,7 @@ curl -b jar -X POST http://localhost:8080/api/vms   -H 'Content-Type: applicatio
 | `internal/ui/` | Dashboard pages (login, MicroVMs, volumes, networks, settings) and `app.js` |
 | `frontend/` | Flask app: login, sessions, serves the dashboard, forwards `/api/*` |
 | `site/` | Animated flow-map website, deployed to GitHub Pages |
-| `nginx/` | Script that installs the `vmX.cryo` ingress config |
+| `nginx/` | Legacy and example Nginx ingress scripts |
 | `utils/` | Build, cleanup and guest helper scripts |
 | `docs/` | Setup, API, DNS and known-issues documentation |
 

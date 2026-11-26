@@ -1,106 +1,67 @@
-# 🌍 CryoSpawn DNS & Ingress Architecture
+# DNS and Ingress
 
-> **Written for:** operators who want to publish the dashboard and VM web services on a real domain through Cloudflare Tunnels and Nginx.
+## Current local ingress
 
-> [!NOTE]
-> This is the target architecture. What exists today: the Flask frontend on port 8080 with login, and the per-VM Unix sockets `/tmp/cryo-<hex>_80.sock`. The `admin.` host, the `/console/[uuid]` web terminal and the Nginx and Cloudflare configs below are not part of the repository yet.
-
-This document outlines the production ingress architecture for CryoSpawn. By leveraging Cloudflare Zero Trust Tunnels and a local Nginx reverse proxy, CryoSpawn can host an infinite number of microVMs on a single physical host without exposing any open ports to the public internet.
-
-## 🧭 1. Architecture Overview
+The implementation creates Ghost Proxy Unix sockets under `/tmp`:
 
 ```text
-[ Internet ] 
-    |
-    v
-[ Cloudflare Edge ] (Handles DNS, SSL/TLS, and DDoS Protection)
-    |
-    | (Encrypted Outbound Tunnel - 0 Open Ports)
-    v
-[ cloudflared daemon ] (Running on Host Machine)
-    |
-    | (Forwards all *.yourdomain.com traffic to port 80)
-    v
-[ Nginx Reverse Proxy ] (The Local Traffic Cop)
-    |
-    |--- If `app.yourdomain.com`   --> Forwards to Python Flask (Port 8080)
-    |--- If `admin.yourdomain.com` --> Forwards to Python Flask (Port 8080)
-    |--- If `[uuid].yourdomain.com`--> Pipes directly into Unix Socket (`/tmp/cryo-[uuid]_80.sock`)
+/tmp/cryo-<hex>_22.sock
+/tmp/cryo-<hex>_80.sock
+/tmp/cryo-<hex>_443.sock
 ```
 
-## 🗺️ 2. URL Schema & Routing Map
+The host name convention is `cryo-<hex>.cryo`. Add a host entry for HTTP testing:
 
-The system is strictly designed to use **one level of subdomains** to remain compatible with Cloudflare's Free Universal SSL. 
+```bash
+echo '127.0.0.1 cryo-da05a06c.cryo' | sudo tee -a /etc/hosts
+```
 
-| URL | Component | Auth Required? | Handled By |
-| :--- | :--- | :--- | :--- |
-| `yourdomain.com` | Public Marketing Landing Page | No | Nginx / Flask |
-| `app.yourdomain.com/login` | Authentication Portal | No | Flask (8080) |
-| `app.yourdomain.com/dashboard` | User Workspace (VMs, Volumes) | Yes (Session) | Flask (8080) |
-| `app.yourdomain.com/console/[uuid]` | In-Browser Web Terminal | Yes (Session) | Flask -> Unix Socket |
-| `admin.yourdomain.com` | Super Admin Global Dashboard | Yes (Admin) | Flask (8080) |
-| `[uuid].yourdomain.com` | User's hosted microVM services | No | Nginx -> Unix Socket |
+A matching Nginx server block can proxy to the VM's Unix socket:
 
-## ☁️ 3. Cloudflare Configuration (Free Tier)
-
-CryoSpawn utilizes **Wildcard Tunnels** to dynamically route user VMs without requiring API calls to Cloudflare for every new VM.
-
-1. **The Tunnel Route:** A single route is created in `cloudflared` mapping `*.yourdomain.com` to `http://localhost:80`.
-2. **The DNS Record:** A manual `CNAME` record with the name `*` must be pointed to the Cloudflare Tunnel ID (e.g., `1234abcd-1234.cfargotunnel.com`).
-3. **SSL Limitations:** Cloudflare Free SSL covers the apex (`domain.com`) and one subdomain level (`*.domain.com`). We avoid deep subdomains (like `[uuid].vms.domain.com`) to prevent SSL certificate warnings.
-
-## 🚦 4. The Nginx Traffic Cop
-
-Because Cloudflare dumps *all* traffic onto localhost port 80, Nginx is responsible for routing. Nginx reads the `Host` header and applies the following logic:
-
-### Platform Routing (Python Flask)
 ```nginx
 server {
     listen 80;
-    server_name app.yourdomain.com admin.yourdomain.com;
-    
+    server_name ~^cryo-(?<hex>[a-f0-9]+)\.cryo$;
+
     location / {
-        proxy_pass http://127.0.0.1:8080;
+        proxy_pass http://unix:/tmp/cryo-$hex_80.sock:;
         proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
     }
 }
 ```
 
-### MicroVM Routing (Dynamic Unix Sockets)
-By using regex, Nginx dynamically maps any 8-character hex subdomain to its corresponding Firecracker Unix socket. No Nginx reloads are required when new VMs are created.
-```nginx
-server {
-    listen 80;
-    server_name ~^([a-f0-9]{8})\.yourdomain\.com$;
+> [!WARNING]
+> The socket name in the example is implementation-sensitive. The repository's `nginx/server.sh` still contains a legacy `vmN.cryo` pattern and must not be used unchanged. Verify the VM UUID and socket before starting Nginx.
 
-    location / {
-        proxy_pass http://unix:/tmp/cryo-$1_80.sock;
-        proxy_set_header Host $host;
-    }
-}
+## SSH
+
+```bash
+ssh -o ProxyCommand="nc -U /tmp/cryo-da05a06c_22.sock" root@localhost
 ```
 
-## 🔒 5. Security Posture
-* **Zero Public Ports:** The host machine requires no port forwarding.
-* **Namespace Isolation:** System dashboards (`app.`) and user VMs (`[uuid].`) are strictly separated by subdomain names. A user cannot hijack `app.yourdomain.com` because the C++ engine generates the VM IDs as 8-character hex strings (`vm-` plus hex).
-* **WebSocket Authentication:** Terminal access via `app.yourdomain.com/console/[uuid]` is verified by Python session cookies before establishing the PTY stream to the VM.
+The Ghost Proxy wakes a hibernated VM when traffic arrives.
 
-## 🛣️ 6. Integration with CryoSpawn Engineering Roadmap
+## Public deployment target
 
-This Cloudflare/Nginx Ingress architecture perfectly sets the stage for the final phases of the `ROADMAP.md`:
+A future public deployment can use Cloudflare Tunnel and Nginx:
 
-### Phase 7: Multi-Tenant RBAC (partly done)
-* **Ingress Mapping:** `app.yourdomain.com/login` and `/dashboard`.
-* **Execution:** Python issues session cookies and keeps the SQLite `users` table. Nginx blindly forwards traffic to Python, and the daemon filters VMs by the `X-User-ID` and `X-Role` headers Python adds. Login, sessions and the header hand-off exist; ownership is not yet recorded on new VMs (see [KNOWN-ISSUES.md](KNOWN-ISSUES.md)).
+```text
+Internet
+  -> Cloudflare edge
+  -> cloudflared
+  -> Nginx
+       -> app.example.com to Flask :8080
+       -> <hex>.example.com to /tmp/cryo-<hex>_80.sock
+```
 
-### Phase 8: Topology Hub & Branching
-* **Ingress Mapping:** `app.yourdomain.com/topology`.
-* **Execution:** Users will interact with the interactive canvas/graph showing active nodes and packet flows. The frontend will hit Python APIs to trigger "Topology Snapshots" and "VM Branching". (The Web Console we discussed earlier can also be integrated here: clicking a node in the topology opens the `xterm.js` terminal window).
+Before exposing a dashboard publicly:
 
-### Phase 9: Cryptographic Handshakes & WAN Expansion
-* **Ingress Mapping:** Backend Cloudflare API orchestration & Tunnel-to-Tunnel peering.
-* **Execution:** Because the platform is fully internet-accessible via Cloudflare Tunnels, Cross-Physical Host Peering (WAN Expansion) becomes natively possible. Two laptops running CryoSpawn can establish authenticated Zero-Trust WireGuard tunnels by exchanging cryptographic tokens via the public API endpoints.
+1. Set a stable `CRYOSPAWN_SECRET_KEY`.
+2. Set `CRYOSPAWN_INTERNAL_SECRET` on Flask and the daemon.
+3. Change the default admin password.
+4. Keep port 9090 loopback-only.
+5. Place the Flask development server behind an authenticated, maintained reverse proxy or production WSGI server.
+6. Ensure wildcard DNS, TLS, and host-header routing match the actual VM UUID.
 
-### Phase 10: Host Administrator "God-Mode" Panel
-* **Ingress Mapping:** `admin.yourdomain.com` (or `app.yourdomain.com/admin`).
-* **Execution:** Secure, globally-scoped route where the Super Admin can execute "Emergency Hibernate All", view KVM telemetry, and manage Hard Quotas. Standard users attempting to access this domain/path will receive a 403 Forbidden via Python.
+The browser terminal, public admin subdomain, dynamic Cloudflare API integration, and topology console are planned features. They are not implemented by the current repository.
