@@ -116,7 +116,7 @@ Stores every individual MicroVM registered in the platform.
 | `name` | `TEXT` | Human-readable name (legacy rows become `legacy-vm-<slot>`). |
 | `owner_id` | `INTEGER DEFAULT 1` | The `users.id` of the owner. Admins see every VM, other users only their own. |
 | `pid` | `INTEGER` | The Linux Process ID (PID) of the active Firecracker instance. Set to `0` when hibernated. |
-| `status` | `TEXT` | Current lifecycle state: `"booting"`, `"running"`, `"hibernated"`, `"waking"` or `"restarting"`. |
+| `status` | `TEXT` | Current lifecycle state: `"booting"`, `"running"`, `"hibernated"`, `"waking"`, `"stopped"`, `"restarting"` or `"terminating"`. |
 | `vcpus` | `INTEGER` | Number of virtual CPU cores allocated (e.g., 1 or 2). |
 | `mem_mib` | `INTEGER` | Dedicated RAM in Megabytes (e.g., 512, 1024). |
 | `guest_ip` | `TEXT` | The internal IP address of the VM inside its virtual network (e.g., `172.16.0.2`). |
@@ -127,7 +127,7 @@ Stores every individual MicroVM registered in the platform.
 | `https_exposed`| `INTEGER`| Boolean (`1` or `0`): whether Ghost Proxy should listen for HTTPS (Port 443). |
 | `host_port` | `INTEGER` | Legacy port field (kept for schema backward compatibility). |
 | `project_name` | `TEXT` | The project namespace (e.g., `"default"`, `"production"`, `"lab1"`). |
-| `rootfs_gb` | `INTEGER` | Requested root disk size in GB (default `1` in the schema; the API defaults to `3`). Added by a safe `ALTER TABLE`. |
+| `rootfs_gb` | `INTEGER` | Requested root disk size in GB (default `3` in the current API and schema migration path). |
 
 ### Table: `network_links`
 Stores custom virtual network bridges established between two isolated VMs.
