@@ -2,7 +2,7 @@ sudo bash -c 'cat << "EOF" > /etc/nginx/conf.d/cryospawn.conf
 # 1. Platform Ingress (Python Flask Dashboard & Auth API)
 server {
     listen 80;
-    server_name app.* admin.*;
+    server_name cryospawn.* app.* admin.*;
 
     location / {
         proxy_pass http://127.0.0.1:8080;
@@ -10,6 +10,10 @@ server {
         proxy_set_header X-Real-IP $remote_addr;
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
         proxy_http_version 1.1;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection "upgrade";
+        proxy_read_timeout 3600s;
+        proxy_send_timeout 3600s;
     }
 }
 
@@ -29,6 +33,9 @@ server {
         proxy_set_header X-Real-IP $remote_addr;
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
         proxy_http_version 1.1;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection "upgrade";
+        proxy_read_timeout 3600s;
     }
 }
 
@@ -48,12 +55,21 @@ server {
         proxy_set_header X-Real-IP $remote_addr;
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
         proxy_http_version 1.1;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection "upgrade";
         proxy_ssl_verify off;
     }
 }
 EOF'
 
+# Ensure systemd nginx service can read /tmp/cryo-*.sock (disable PrivateTmp)
+if command -v systemctl >/dev/null 2>&1 && systemctl list-unit-files nginx.service >/dev/null 2>&1; then
+    sudo mkdir -p /etc/systemd/system/nginx.service.d
+    printf "[Service]\nPrivateTmp=false\n" | sudo tee /etc/systemd/system/nginx.service.d/override.conf >/dev/null
+    sudo systemctl daemon-reload || true
+fi
+
 # Reload Nginx to apply the new config instantly if running
 if command -v nginx >/dev/null 2>&1; then
-    sudo nginx -t && sudo nginx -s reload || true
+    sudo nginx -t && (sudo systemctl restart nginx 2>/dev/null || sudo nginx -s reload || true)
 fi

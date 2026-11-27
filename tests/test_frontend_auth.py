@@ -441,5 +441,58 @@ class FrontendAuthTestCase(unittest.TestCase):
             self.assertEqual(r3.status_code, 200)
         self.assertEqual(client.delete('/api/projects/constructor').status_code, 200)
 
+    def test_19_console_auth_uuid_validation_and_ws_accept(self):
+        from unittest.mock import patch, MagicMock
+        from frontend.ws_console import build_ws_accept
+
+        # RFC 6455 test vector
+        self.assertEqual(build_ws_accept("dGhlIHNhbXBsZSBub25jZQ=="), "s3pPLMBiTxaQ9kYGzzhZRbK+xOo=")
+
+        anon = app.test_client()
+        self.assertEqual(anon.get('/console/vm-da05a06c', follow_redirects=False).status_code, 302)
+        self.assertEqual(anon.get('/ws/console/vm-da05a06c').status_code, 401)
+
+        client = app.test_client()
+        client.post('/api/auth/login', json={'username': 'alice', 'password': 'newpassword123'})
+
+        # Malicious / invalid VM UUIDs blocked
+        self.assertEqual(client.get('/console/vm-bad;id').status_code, 400)
+        self.assertEqual(client.get('/ws/console/vm-bad;id').status_code, 400)
+
+        with patch('frontend.app.requests.request') as mock_req:
+            # Cross-tenant 403 from C++ backend
+            r403 = MagicMock()
+            r403.status_code = 403
+            r403.json.return_value = {'error': 'Forbidden'}
+            mock_req.return_value = r403
+            self.assertEqual(client.get('/ws/console/vm-da05a06c').status_code, 403)
+
+            # SSH disabled -> 400
+            r_no_ssh = MagicMock()
+            r_no_ssh.status_code = 200
+            r_no_ssh.json.return_value = {'uuid': 'vm-da05a06c', 'ssh_exposed': False}
+            mock_req.return_value = r_no_ssh
+            self.assertEqual(client.get('/ws/console/vm-da05a06c').status_code, 400)
+
+            # SSH enabled but non-WebSocket HTTP request -> 426 Upgrade Required
+            r_ok = MagicMock()
+            r_ok.status_code = 200
+            r_ok.json.return_value = {'uuid': 'vm-da05a06c', 'ssh_exposed': True}
+            mock_req.return_value = r_ok
+            self.assertEqual(client.get('/ws/console/vm-da05a06c').status_code, 426)
+
+        with client.get('/console/vm-da05a06c') as page:
+            self.assertEqual(page.status_code, 200)
+
+        # /api/config requires auth and reflects CRYOSPAWN_PUBLIC_DOMAIN
+        self.assertEqual(anon.get('/api/config').status_code, 401)
+        os.environ['CRYOSPAWN_PUBLIC_DOMAIN'] = 'zibai.space'
+        try:
+            cfg = client.get('/api/config')
+            self.assertEqual(cfg.status_code, 200)
+            self.assertEqual(cfg.json.get('public_domain'), 'zibai.space')
+        finally:
+            os.environ.pop('CRYOSPAWN_PUBLIC_DOMAIN', None)
+
 if __name__ == '__main__':
     unittest.main()

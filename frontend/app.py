@@ -7,14 +7,22 @@ import re
 import json
 import secrets
 
+try:
+    from frontend.ws_console import build_ws_accept, bridge_websocket_to_pty
+except ImportError:
+    from ws_console import build_ws_accept, bridge_websocket_to_pty
+
 app = Flask(__name__, static_folder='../internal/ui')
 app.secret_key = os.environ.get('CRYOSPAWN_SECRET_KEY') or secrets.token_hex(32)
 BACKEND_PORT = os.environ.get('CRYOSPAWN_BACKEND_PORT', '9090')
 BACKEND_URL = os.environ.get('CRYOSPAWN_BACKEND_URL', f'http://127.0.0.1:{BACKEND_PORT}')
 INTERNAL_SECRET = os.environ.get('CRYOSPAWN_INTERNAL_SECRET', '')
 DB_PATH = os.environ.get('CRYOSPAWN_DB_PATH', os.path.abspath(os.path.join(os.path.dirname(__file__), '../cryospawn.db')))
+SSH_KEY_PATH = os.environ.get('CRYOSPAWN_SSH_KEY_PATH', os.path.abspath(os.path.join(os.path.dirname(__file__), '../ubuntu-24.04.id_rsa')))
+PUBLIC_DOMAIN = os.environ.get('CRYOSPAWN_PUBLIC_DOMAIN', '').strip().lstrip('.')
 
 PROJECT_NAME_RE = re.compile(r'^[A-Za-z0-9][A-Za-z0-9._ -]{0,63}\Z')
+VM_UUID_RE = re.compile(r'^(?:vm-)?[a-fA-F0-9]{4,64}\Z')
 
 
 def get_db_path():
@@ -160,7 +168,21 @@ def logout():
 def get_me():
     if 'user_id' not in session:
         return jsonify({"error": "Unauthorized"}), 401
-    return jsonify({"user_id": session['user_id'], "username": session['username'], "role": session['role']})
+    return jsonify({
+        "user_id": session['user_id'],
+        "username": session['username'],
+        "role": session['role'],
+        "public_domain": os.environ.get('CRYOSPAWN_PUBLIC_DOMAIN', PUBLIC_DOMAIN).strip().lstrip('.'),
+    })
+
+
+@app.route('/api/config', methods=['GET'])
+def get_public_config():
+    if 'user_id' not in session:
+        return jsonify({"error": "Unauthorized"}), 401
+    return jsonify({
+        "public_domain": os.environ.get('CRYOSPAWN_PUBLIC_DOMAIN', PUBLIC_DOMAIN).strip().lstrip('.'),
+    })
 
 # --- PROJECT ROUTES (Multi-tenant scoped by session['user_id']) ---
 def _get_user_projects_map(conn, user_id):
@@ -368,6 +390,98 @@ def serve_project_page(project_name):
     if 'user_id' not in session:
         return redirect('/login')
     return send_from_directory(app.static_folder, 'project.html')
+
+
+def _authorize_vm_console(vm_uuid):
+    if 'user_id' not in session:
+        return None, ("Unauthorized", 401)
+    if not isinstance(vm_uuid, str) or not VM_UUID_RE.match(vm_uuid):
+        return None, ("Invalid VM UUID", 400)
+
+    headers = {
+        'X-User-ID': str(session['user_id']),
+        'X-Role': session['role'],
+    }
+    if INTERNAL_SECRET:
+        headers['X-Internal-Secret'] = INTERNAL_SECRET
+
+    try:
+        resp = requests.request(
+            method='GET',
+            url=f"{BACKEND_URL}/api/vms/{vm_uuid}",
+            headers=headers,
+            allow_redirects=False,
+            timeout=5,
+        )
+    except requests.exceptions.RequestException as e:
+        return None, (f"C++ backend unavailable: {e}", 502)
+
+    if resp.status_code != 200:
+        try:
+            err = resp.json().get('error', 'Forbidden or not found')
+        except Exception:
+            err = 'Forbidden or not found'
+        return None, (err, resp.status_code)
+
+    vm_data = resp.json()
+    if not vm_data.get('ssh_exposed'):
+        return None, ("SSH (Port 22) is not enabled for this VM. Enable SSH (Port 22) first.", 400)
+
+    return vm_data, None
+
+
+@app.route('/console/<vm_uuid>')
+@app.route('/console/<vm_uuid>/')
+def serve_console_page(vm_uuid):
+    if 'user_id' not in session:
+        return redirect('/login')
+    if not VM_UUID_RE.match(vm_uuid):
+        return jsonify({"error": "Invalid VM UUID"}), 400
+    return send_from_directory(app.static_folder, 'console.html')
+
+
+@app.route('/ws/console/<vm_uuid>', websocket=True)
+@app.route('/ws/console/<vm_uuid>', websocket=False)
+def ws_console(vm_uuid):
+    vm_data, err = _authorize_vm_console(vm_uuid)
+    if err is not None:
+        msg, code = err
+        return jsonify({"error": msg}), code
+
+    upgrade = request.headers.get('Upgrade', '')
+    ws_key = request.headers.get('Sec-WebSocket-Key', '')
+    if upgrade.lower() != 'websocket' or not ws_key:
+        return jsonify({"error": "WebSocket upgrade required"}), 426
+
+    sock = request.environ.get('werkzeug.socket') or request.environ.get('gunicorn.socket')
+    if sock is None:
+        return jsonify({"error": "WebSocket transport unavailable"}), 501
+
+    canonical_uuid = vm_data.get('uuid') or vm_uuid
+    if not VM_UUID_RE.match(canonical_uuid):
+        return jsonify({"error": "Invalid VM UUID"}), 400
+
+    hex_id = canonical_uuid[3:] if canonical_uuid.startswith('vm-') else canonical_uuid
+    uds_path = f"/tmp/cryo-{hex_id}_22.sock"
+
+    accept_val = build_ws_accept(ws_key)
+    handshake = (
+        "HTTP/1.1 101 Switching Protocols\r\n"
+        "Upgrade: websocket\r\n"
+        "Connection: Upgrade\r\n"
+        f"Sec-WebSocket-Accept: {accept_val}\r\n\r\n"
+    ).encode('ascii')
+
+    try:
+        sock.sendall(handshake)
+        bridge_websocket_to_pty(sock, uds_path, key_path=SSH_KEY_PATH)
+    finally:
+        try:
+            sock.close()
+        except OSError:
+            pass
+
+    return Response('', status=204)
 
 @app.route('/<path:filename>')
 def serve_static(filename):

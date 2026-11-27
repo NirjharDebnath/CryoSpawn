@@ -25,9 +25,19 @@ const volumesContainer = document.getElementById('volumes-container');
 let cachedVMs = null;
 let cachedVolumes = [];
 let cachedProjects = [];
+let configuredPublicDomain = '';
 let lastRenderState = "";
 let fetchSeq = 0;
 let latestAppliedSeq = 0;
+
+function getPublicDomain() {
+    if (configuredPublicDomain) return configuredPublicDomain;
+    const host = (typeof window !== 'undefined' && window.location && window.location.hostname)
+        ? window.location.hostname
+        : '';
+    const match = host.match(/^(?:cryospawn|app|admin)\.([a-zA-Z0-9.-]+\.[a-zA-Z]{2,})$/);
+    return match ? match[1] : '';
+}
 
 function escapeHtml(str) {
     if (str === null || str === undefined) return '';
@@ -403,13 +413,19 @@ function renderTable(vms) {
         const hex = vmUuid.startsWith('vm-') ? vmUuid.substring(3) : vmUuid;
         const safeUuid = escapeHtml(vmUuid);
         const safeJsUuid = escapeJsString(vmUuid);
+        const safeJsName = escapeJsString(vm.name || ('VM ' + vm.id));
         const safeJsLanIp = escapeJsString(vm.host_lan_ip || '');
         const safeHostPort = parseInt(vm.host_port, 10) || 0;
+        const consoleBtn = vm.ssh_exposed ? `
+            <button onclick="openConsole('${safeJsUuid}', '${safeJsName}')" class="text-xs font-semibold text-sky-900 bg-sky-100 hover:bg-sky-200 px-3 py-1.5 rounded-lg transition-colors border border-sky-300">
+                &gt;_ Console
+            </button>
+        ` : '';
 
         if (vm.status === 'running') {
             statusBadge = `<span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-[11px] font-semibold bg-emerald-50 text-emerald-700 border border-emerald-200"><span class="w-1.5 h-1.5 rounded-full bg-emerald-500 mr-1.5"></span>Running</span>`;
 
-            actionButtons = ``;
+            actionButtons = consoleBtn;
             if (vm.ssh_exposed) {
                 actionButtons += `
                     <button onclick="copySSH(this, '${safeJsUuid}', ${safeHostPort}, '${safeJsLanIp}')" class="text-xs font-semibold text-blue-600 bg-blue-50 hover:bg-blue-100 px-3 py-1.5 rounded-lg transition-colors border border-blue-200">
@@ -428,14 +444,14 @@ function renderTable(vms) {
             `;
         } else if (vm.status === 'hibernated') {
             statusBadge = `<span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-[11px] font-semibold bg-amber-50 text-amber-700 border border-amber-200"><span class="w-1.5 h-1.5 rounded-full bg-amber-500 mr-1.5"></span>Hibernated</span>`;
-            actionButtons = `
+            actionButtons = consoleBtn + `
                 <button onclick="wakeVM('${safeJsUuid}')" class="text-xs font-semibold text-emerald-700 bg-emerald-50 hover:bg-emerald-100 px-3 py-1.5 rounded-lg transition-colors border border-emerald-200">
                     Wake VM
                 </button>
             `;
         } else if (vm.status === 'stopped') {
             statusBadge = `<span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-[11px] font-semibold bg-slate-100 text-slate-700 border border-slate-200"><span class="w-1.5 h-1.5 rounded-full bg-slate-500 mr-1.5"></span>Stopped</span>`;
-            actionButtons = `
+            actionButtons = consoleBtn + `
                 <button onclick="wakeVM('${safeJsUuid}')" class="text-xs font-semibold text-emerald-700 bg-emerald-50 hover:bg-emerald-100 px-3 py-1.5 rounded-lg transition-colors border border-emerald-200">
                     Start VM
                 </button>
@@ -446,7 +462,13 @@ function renderTable(vms) {
         }
 
         let domains = '';
-        if (vm.http_exposed) domains += `<div class="mt-1"><a href="http://cryo-${escapeHtml(hex)}.cryo" target="_blank" class="text-[#0b4f7c] hover:underline text-[10px] font-medium">http://cryo-${escapeHtml(hex)}.cryo</a></div>`;
+        const pubDomain = getPublicDomain();
+        if (vm.http_exposed) {
+            if (pubDomain) {
+                domains += `<div class="mt-1"><a href="https://cryo-${escapeHtml(hex)}.${escapeHtml(pubDomain)}" target="_blank" class="text-emerald-700 hover:underline text-[10px] font-semibold">https://cryo-${escapeHtml(hex)}.${escapeHtml(pubDomain)}</a></div>`;
+            }
+            domains += `<div class="mt-0.5"><a href="http://cryo-${escapeHtml(hex)}.cryo" target="_blank" class="text-[#0b4f7c] hover:underline text-[10px] font-medium">http://cryo-${escapeHtml(hex)}.cryo</a></div>`;
+        }
         if (vm.https_exposed) domains += `<div class="mt-0.5"><a href="https://cryo-${escapeHtml(hex)}.cryo" target="_blank" class="text-emerald-700 hover:underline text-[10px] font-medium">https://cryo-${escapeHtml(hex)}.cryo</a></div>`;
 
         let hostPortInfo = '';
@@ -1285,6 +1307,13 @@ const needsLiveData = !!(
     document.getElementById('routing-permissions-container')
 );
 if (needsLiveData) {
+    fetch('/api/config').then(r => r.ok ? r.json() : null).then(cfg => {
+        if (cfg && cfg.public_domain) {
+            configuredPublicDomain = String(cfg.public_domain).trim();
+            lastRenderState = "";
+            fetchData();
+        }
+    }).catch(() => {});
     fetchData();
     setInterval(fetchData, 2000);
 }
@@ -1295,10 +1324,132 @@ if (rootfsGb && rootfsDisplay) {
     rootfsGb.addEventListener('input', (e) => rootfsDisplay.textContent = e.target.value + ' GB');
 }
 
+let activeConsoleTerm = null;
+let activeConsoleFit = null;
+let activeConsoleWs = null;
+let activeConsoleUuid = '';
+
+function setConsoleModalStatus(label, tone) {
+    const el = document.getElementById('console-modal-status');
+    if (!el) return;
+    const classes = {
+        connecting: 'bg-amber-950/70 text-amber-300 border-amber-700/60',
+        connected: 'bg-emerald-950/70 text-emerald-300 border-emerald-700/60',
+        disconnected: 'bg-rose-950/70 text-rose-300 border-rose-700/60'
+    };
+    el.className = `inline-flex items-center gap-1.5 text-[11px] font-semibold px-2 py-0.5 rounded-full border ${classes[tone] || classes.disconnected}`;
+    el.textContent = label;
+}
+
+function connectConsoleSocket(uuid) {
+    if (!activeConsoleTerm || !uuid) return;
+    if (activeConsoleWs) {
+        try { activeConsoleWs.close(); } catch (_) {}
+        activeConsoleWs = null;
+    }
+    setConsoleModalStatus('Connecting...', 'connecting');
+    activeConsoleTerm.writeln(`\x1b[36m[*] Opening console to ${uuid}...\x1b[0m`);
+
+    const proto = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+    const ws = new WebSocket(`${proto}//${window.location.host}/ws/console/${encodeURIComponent(uuid)}`);
+    activeConsoleWs = ws;
+
+    ws.onopen = () => {
+        setConsoleModalStatus('Connected', 'connected');
+        if (activeConsoleFit) activeConsoleFit.fit();
+        ws.send(JSON.stringify({ type: 'resize', cols: activeConsoleTerm.cols, rows: activeConsoleTerm.rows }));
+        activeConsoleTerm.focus();
+    };
+    ws.onmessage = (evt) => {
+        if (activeConsoleTerm) activeConsoleTerm.write(evt.data);
+    };
+    ws.onclose = () => {
+        if (activeConsoleWs === ws) {
+            setConsoleModalStatus('Disconnected', 'disconnected');
+            if (activeConsoleTerm) activeConsoleTerm.writeln('\r\n\x1b[33m[!] Session closed.\x1b[0m');
+        }
+    };
+    ws.onerror = () => {
+        setConsoleModalStatus('Error', 'disconnected');
+        if (activeConsoleTerm) activeConsoleTerm.writeln('\r\n\x1b[31m[-] WebSocket error.\x1b[0m');
+    };
+}
+
+function openConsole(uuid, name) {
+    const modal = document.getElementById('console-modal');
+    const container = document.getElementById('console-terminal');
+    if (!modal || !container || typeof Terminal === 'undefined') {
+        window.open(`/console/${encodeURIComponent(uuid)}`, '_blank');
+        return;
+    }
+
+    activeConsoleUuid = uuid;
+    const titleEl = document.getElementById('console-modal-title');
+    const uuidEl = document.getElementById('console-modal-uuid');
+    const popoutEl = document.getElementById('console-modal-popout');
+    if (titleEl) titleEl.textContent = name || uuid;
+    if (uuidEl) uuidEl.textContent = uuid;
+    if (popoutEl) popoutEl.href = `/console/${encodeURIComponent(uuid)}`;
+
+    modal.classList.remove('hidden');
+
+    if (!activeConsoleTerm) {
+        activeConsoleTerm = new Terminal({
+            cursorBlink: true,
+            fontSize: 13,
+            fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace',
+            theme: { background: '#0c1624', foreground: '#e2e8f0', cursor: '#38bdf8' }
+        });
+        if (typeof FitAddon !== 'undefined' && FitAddon.FitAddon) {
+            activeConsoleFit = new FitAddon.FitAddon();
+            activeConsoleTerm.loadAddon(activeConsoleFit);
+        }
+        activeConsoleTerm.open(container);
+        activeConsoleTerm.onData((data) => {
+            if (activeConsoleWs && activeConsoleWs.readyState === WebSocket.OPEN) {
+                activeConsoleWs.send(JSON.stringify({ type: 'input', data }));
+            }
+        });
+        activeConsoleTerm.onResize(({ cols, rows }) => {
+            if (activeConsoleWs && activeConsoleWs.readyState === WebSocket.OPEN) {
+                activeConsoleWs.send(JSON.stringify({ type: 'resize', cols, rows }));
+            }
+        });
+        if (typeof window !== 'undefined' && typeof window.addEventListener === 'function') {
+            window.addEventListener('resize', () => {
+                if (activeConsoleFit && !modal.classList.contains('hidden')) {
+                    activeConsoleFit.fit();
+                }
+            });
+        }
+    } else {
+        activeConsoleTerm.reset();
+    }
+
+    if (activeConsoleFit) {
+        setTimeout(() => activeConsoleFit.fit(), 30);
+    }
+    connectConsoleSocket(uuid);
+}
+
+function reconnectConsole() {
+    if (activeConsoleUuid) connectConsoleSocket(activeConsoleUuid);
+}
+
+function closeConsoleModal() {
+    const modal = document.getElementById('console-modal');
+    if (modal) modal.classList.add('hidden');
+    if (activeConsoleWs) {
+        try { activeConsoleWs.close(); } catch (_) {}
+        activeConsoleWs = null;
+    }
+}
+
 if (typeof document !== 'undefined' && typeof document.addEventListener === 'function') {
     document.addEventListener('keydown', (e) => {
         if (e.key === 'Escape') {
             closeSSHModal();
+            closeConsoleModal();
         }
     });
 }

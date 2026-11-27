@@ -1,0 +1,143 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>CryoSpawn - Web Console</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@xterm/xterm@5.5.0/css/xterm.min.css">
+    <script src="https://cdn.jsdelivr.net/npm/@xterm/xterm@5.5.0/lib/xterm.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@xterm/addon-fit@0.10.0/lib/addon-fit.min.js"></script>
+    <link rel="stylesheet" href="/style.css">
+</head>
+<body class="bg-[#0b1320] text-slate-100 font-sans antialiased flex flex-col h-screen overflow-hidden">
+    <header class="bg-[#0f1b2d] border-b border-sky-900/60 px-4 sm:px-6 py-3 flex flex-wrap items-center justify-between gap-3 shrink-0">
+        <div class="flex items-center gap-3 min-w-0">
+            <a href="/dashboard" class="text-xs font-semibold px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-sky-200 border border-slate-700 transition-colors">
+                ← Dashboard
+            </a>
+            <div class="min-w-0">
+                <div class="flex items-center gap-2">
+                    <span class="text-sm font-bold text-white truncate" id="console-vm-title">MicroVM Console</span>
+                    <span id="console-vm-uuid" class="text-[11px] font-mono text-sky-300 bg-sky-950/80 border border-sky-800/70 px-2 py-0.5 rounded"></span>
+                </div>
+            </div>
+        </div>
+        <div class="flex items-center gap-2.5">
+            <span id="console-status" class="inline-flex items-center gap-1.5 text-xs font-semibold px-2.5 py-1 rounded-full bg-amber-950/70 text-amber-300 border border-amber-700/60">
+                <span class="w-1.5 h-1.5 rounded-full bg-amber-400"></span>
+                Connecting...
+            </span>
+            <button type="button" onclick="connectConsole()" class="text-xs font-semibold px-3 py-1.5 rounded-lg bg-sky-700 hover:bg-sky-600 text-white transition-colors">
+                Reconnect
+            </button>
+        </div>
+    </header>
+
+    <main class="flex-1 p-3 sm:p-4 min-h-0 flex flex-col">
+        <div id="terminal-container" class="flex-1 w-full h-full rounded-xl overflow-hidden border border-slate-800 bg-[#0c1624] p-2"></div>
+    </main>
+
+    <script>
+        const match = window.location.pathname.match(/^\/console\/([^/]+)\/?$/);
+        const vmUuid = match ? decodeURIComponent(match[1]) : '';
+        document.getElementById('console-vm-uuid').textContent = vmUuid || 'unknown';
+
+        const statusEl = document.getElementById('console-status');
+        function setStatus(label, tone) {
+            const styles = {
+                connecting: 'bg-amber-950/70 text-amber-300 border-amber-700/60',
+                connected: 'bg-emerald-950/70 text-emerald-300 border-emerald-700/60',
+                disconnected: 'bg-rose-950/70 text-rose-300 border-rose-700/60'
+            };
+            const dot = {
+                connecting: 'bg-amber-400',
+                connected: 'bg-emerald-400',
+                disconnected: 'bg-rose-400'
+            };
+            statusEl.className = `inline-flex items-center gap-1.5 text-xs font-semibold px-2.5 py-1 rounded-full border ${styles[tone] || styles.disconnected}`;
+            statusEl.innerHTML = `<span class="w-1.5 h-1.5 rounded-full ${dot[tone] || dot.disconnected}"></span>${label}`;
+        }
+
+        const term = new Terminal({
+            cursorBlink: true,
+            fontSize: 14,
+            fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace',
+            theme: {
+                background: '#0c1624',
+                foreground: '#e2e8f0',
+                cursor: '#38bdf8'
+            }
+        });
+        const fitAddon = new FitAddon.FitAddon();
+        term.loadAddon(fitAddon);
+        term.open(document.getElementById('terminal-container'));
+        fitAddon.fit();
+
+        let ws = null;
+        term.onData((data) => {
+            if (ws && ws.readyState === WebSocket.OPEN) {
+                ws.send(JSON.stringify({ type: 'input', data }));
+            }
+        });
+        term.onResize(({ cols, rows }) => {
+            if (ws && ws.readyState === WebSocket.OPEN) {
+                ws.send(JSON.stringify({ type: 'resize', cols, rows }));
+            }
+        });
+        window.addEventListener('resize', () => fitAddon.fit());
+
+        async function loadMeta() {
+            try {
+                const res = await fetch(`/api/vms/${encodeURIComponent(vmUuid)}`);
+                if (res.status === 401) { window.location.href = '/login'; return; }
+                if (res.ok) {
+                    const vm = await res.json();
+                    document.getElementById('console-vm-title').textContent = vm.name || vm.uuid;
+                    document.title = `Console - ${vm.name || vm.uuid}`;
+                }
+            } catch (_) {}
+        }
+
+        function connectConsole() {
+            if (!vmUuid) {
+                term.writeln('\x1b[31mMissing VM UUID in URL.\x1b[0m');
+                setStatus('Invalid VM', 'disconnected');
+                return;
+            }
+            if (ws) {
+                try { ws.close(); } catch (_) {}
+            }
+            setStatus('Connecting...', 'connecting');
+            term.writeln(`\x1b[36m[*] Connecting to ${vmUuid}...\x1b[0m`);
+
+            const proto = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+            ws = new WebSocket(`${proto}//${window.location.host}/ws/console/${encodeURIComponent(vmUuid)}`);
+
+            ws.onopen = () => {
+                setStatus('Connected', 'connected');
+                fitAddon.fit();
+                ws.send(JSON.stringify({ type: 'resize', cols: term.cols, rows: term.rows }));
+                term.focus();
+            };
+
+            ws.onmessage = (evt) => {
+                term.write(evt.data);
+            };
+
+            ws.onclose = () => {
+                setStatus('Disconnected', 'disconnected');
+                term.writeln('\r\n\x1b[33m[!] Console session closed.\x1b[0m');
+            };
+
+            ws.onerror = () => {
+                setStatus('Error', 'disconnected');
+                term.writeln('\r\n\x1b[31m[-] WebSocket error (check VM SSH toggle & daemon).\x1b[0m');
+            };
+        }
+
+        loadMeta();
+        connectConsole();
+    </script>
+</body>
+</html>

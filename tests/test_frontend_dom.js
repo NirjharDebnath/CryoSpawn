@@ -450,6 +450,24 @@ console.log("  [✓] getActiveProjectFromRoute trims trailing spaces and handles
     assert(elements['projects-grid'].innerHTML.includes('other-proj'));
     console.log("  [✓] fetchData preserves cachedProjects on transient /api/projects error");
 
+    // Test 28: renderTable shows >_ Console button only when ssh_exposed is true
+    renderTable([
+        { id: 0, uuid: 'vm-ssh1', name: 'ConsoleVM', ip: '172.16.0.2', host_ip: '172.16.0.1', status: 'running', ssh_exposed: true, project: 'default' },
+        { id: 1, uuid: 'vm-nossh', name: 'NoSshVM', ip: '172.16.0.6', host_ip: '172.16.0.5', status: 'hibernated', ssh_exposed: false, project: 'default' }
+    ]);
+    assert(elements['vm-table-body'].innerHTML.includes("openConsole('vm-ssh1', 'ConsoleVM')"), "Console button must render when ssh_exposed is true");
+    assert(!elements['vm-table-body'].innerHTML.includes("openConsole('vm-nossh'"), "Console button must not render when ssh_exposed is false");
+    console.log("  [✓] renderTable renders >_ Console button when ssh_exposed is enabled");
+
+    // Test 29: public domain auto-detection from cryospawn.zibai.space renders https://cryo-<hex>.zibai.space
+    window.location.hostname = 'cryospawn.zibai.space';
+    renderTable([
+        { id: 0, uuid: 'vm-01ec6554', name: 'WebVM', ip: '172.16.0.2', host_ip: '172.16.0.1', status: 'running', http_exposed: true, project: 'default' }
+    ]);
+    assert(elements['vm-table-body'].innerHTML.includes('https://cryo-01ec6554.zibai.space'), "Public domain link must render when hosted under app.<domain>");
+    window.location.hostname = '';
+    console.log("  [✓] renderTable renders public domain HTTPS link automatically");
+
     console.log("[✓] ALL FRONTEND DOM TESTS PASSED!");
     process.exit(0);
 })().catch(err => {

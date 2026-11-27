@@ -43,7 +43,7 @@ namespace config {
     inline std::string get_rootfs_path() {
         const char* env = std::getenv("CRYOSPAWN_ROOTFS_PATH");
         if (env && std::strlen(env) > 0) return std::string(env);
-        return BASE_PATH + "/rootfs/ubuntu-rootfs.ext4";
+        return BASE_PATH + "/rootfs/ubuntu-24.04-minimal.ext4";
     }
 
     inline std::string get_db_path() {

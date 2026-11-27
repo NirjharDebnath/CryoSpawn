@@ -5,6 +5,9 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>CryoSpawn - Project Workspace</title>
     <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@xterm/xterm@5.5.0/css/xterm.min.css">
+    <script src="https://cdn.jsdelivr.net/npm/@xterm/xterm@5.5.0/lib/xterm.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@xterm/addon-fit@0.10.0/lib/addon-fit.min.js"></script>
     <link rel="stylesheet" href="/style.css">
 </head>
 <body class="alpine-daylight font-sans antialiased flex h-screen overflow-hidden">
@@ -270,6 +273,30 @@
                     Close
                 </button>
             </div>
+        </div>
+    </div>
+
+    <!-- Web Console Modal (xterm.js) -->
+    <div id="console-modal" onclick="if (event.target === this) closeConsoleModal()" class="fixed inset-0 bg-[#0c2238]/60 backdrop-blur-sm z-50 flex items-center justify-center hidden p-3 sm:p-6">
+        <div class="bg-[#0f1b2d] border border-sky-800/70 rounded-2xl shadow-2xl max-w-5xl w-full h-[80vh] flex flex-col overflow-hidden">
+            <div class="px-4 sm:px-5 py-3 border-b border-sky-900/70 flex flex-wrap items-center justify-between gap-2 shrink-0">
+                <div class="flex items-center gap-2.5 min-w-0">
+                    <span class="text-sky-400 font-mono text-sm font-bold">&gt;_</span>
+                    <h3 id="console-modal-title" class="text-sm font-bold text-white truncate">MicroVM Console</h3>
+                    <span id="console-modal-uuid" class="text-[11px] font-mono text-sky-300 bg-sky-950/80 border border-sky-800/70 px-2 py-0.5 rounded hidden sm:inline"></span>
+                    <span id="console-modal-status" class="inline-flex items-center gap-1.5 text-[11px] font-semibold px-2 py-0.5 rounded-full bg-amber-950/70 text-amber-300 border border-amber-700/60">Connecting...</span>
+                </div>
+                <div class="flex items-center gap-2">
+                    <a id="console-modal-popout" href="#" target="_blank" class="text-xs font-semibold text-sky-300 hover:text-white bg-slate-800 hover:bg-slate-700 px-2.5 py-1 rounded-lg border border-slate-700 transition-colors">
+                        Pop out ↗
+                    </a>
+                    <button type="button" onclick="reconnectConsole()" class="text-xs font-semibold text-white bg-sky-700 hover:bg-sky-600 px-2.5 py-1 rounded-lg transition-colors">
+                        Reconnect
+                    </button>
+                    <button type="button" onclick="closeConsoleModal()" aria-label="Close console modal" class="text-slate-300 hover:text-white px-2 py-1 text-lg font-bold leading-none">&times;</button>
+                </div>
+            </div>
+            <div id="console-terminal" class="flex-1 w-full min-h-0 bg-[#0c1624] p-2"></div>
         </div>
     </div>
 
