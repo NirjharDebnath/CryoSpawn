@@ -14,6 +14,10 @@ This roadmap separates implemented behavior from future engineering work.
 - C++ authentication checks for trusted identity headers and shared-secret support
 - Dynamic dashboard views and API proxy
 - Asset download script for supported kernel/rootfs images
+- In-browser `xterm.js` Web Console (`frontend/ws_console.py`, `/console/<uuid>`, `/ws/console/<uuid>`)
+- Named Cloudflare Tunnel + Nginx wildcard ingress (`nginx/server.sh`) with WebSocket `Upgrade` headers and `PrivateTmp=false`
+- Modular God-Mode Host Admin Panel (`admin/` on `:9091`) with daemon lifecycle control, live logs, RootFS & Kernel Studio, `>_ Chroot` shell, SQLite Explorer, and Custom SQL Console
+- Guest DevTools & Ubuntu 24.04 Minimal setup script (`utils/setup_guest_devtools.sh`)
 
 ## Phase 7: multi-user hardening - partial
 
@@ -43,13 +47,18 @@ Remaining:
 - Per-link port policy
 - Tenant-to-tenant isolation guarantees
 
-## Phase 10: host administration - planned
+## Phase 10: host administration - largely implemented
 
-- Host CPU, memory, disk, TAP, and Firecracker telemetry
-- Emergency hibernate and stale-resource cleanup
+Implemented in `admin/` (`:9091`):
+- Host CPU, memory, disk, TAP, and socket telemetry
+- Daemon Start/Stop/Restart (`--kernel`, `--rootfs`, `stdbuf -oL -eL`) and live log viewer
+- Emergency hibernate-all and stale TAP/socket cleanup
+- Global `?all=true` administrative dashboard + `xterm.js` consoles
+- Multi-RootFS & Kernel Studio (clone, Fix DNS, resize, `>_ Chroot`) + SQLite Explorer & Custom SQL Console
+
+Remaining:
 - Hard quotas for CPUs, memory, storage, and VM count
-- Security and lifecycle audit logs
-- Global administrative dashboard
+- Persistent security and lifecycle audit logs
 
 ## Documentation status
 

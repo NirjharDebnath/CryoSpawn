@@ -93,11 +93,18 @@ On top of this engine, CryoSpawn adds our **"Cryo Engine" superpowers**:
           Fork & Unix Socket API               Unix Domain Sockets (/tmp/*.sock)
                     v                                    v
 +--------------------------------------+  +----------------------------------+
-|      AWS FIRECRACKER PROCESSES       |  |       HOST NGINX INGRESS         |
-|  - KVM virtualization hardware engine|  |  - Wildcard *.cryo routing       |
-|  - Loads ubuntu-vmlinux.bin kernel   |  |  - Passes traffic to Ghost Proxy |
-|  - Mounts instance Copy-on-Write ext4|  +----------------------------------+
-+--------------------------------------+
+|      AWS FIRECRACKER PROCESSES       |  |       HOST NGINX + CLOUDFLARED   |
+|  - KVM virtualization hardware engine|  |  - cryospawn.<domain> -> :8080   |
+|  - Loads selected vmlinux kernel     |  |  - cryo-<hex>.<domain> -> _80    |
+|  - Mounts instance Copy-on-Write ext4|  |  - WebSocket Upgrade for xterm   |
++--------------------------------------+  +----------------------------------+
+                                                         ^
++--------------------------------------------------------+-------------------+
+|                    GOD-MODE HOST ADMIN PANEL (admin/, :9091)               |
+|  - Private LAN/host controller (runs as root with sudo)                    |
+|  - Starts/stops C++ daemon (--kernel, --rootfs, stdbuf -oL -eL)            |
+|  - RootFS Studio (clone, Fix DNS, resize, xterm chroot), SQLite & SQL      |
++----------------------------------------------------------------------------+
 ```
 
 ---
@@ -326,6 +333,12 @@ ssh -o ProxyCommand="nc -U /tmp/cryo-da05a06c_22.sock" root@localhost
 - Netcat connects directly to the Unix Domain Socket.
 - Ghost Proxy detects the connection, wakes the VM if it was sleeping, and connects to the VM's internal SSH server (`172.16.0.2:22`).
 - You are logged into root shell!
+
+### In-Browser `xterm.js` Web Console (`frontend/ws_console.py`)
+For browser-only access (including over HTTPS Cloudflare Tunnels without a local SSH client), `frontend/app.py` exposes `/console/<uuid>` and `/ws/console/<uuid>`:
+- `frontend/ws_console.py` implements a zero-dependency RFC 6455 WebSocket handshake and spawns `ssh -tt -o ProxyCommand="nc -U /tmp/cryo-<hex>_22.sock" root@localhost` inside a Python `pty`.
+- Flask verifies the user's session and queries `GET /api/vms/<uuid>` with `X-User-ID` / `X-Role` before upgrading to WebSocket, and calls `sock.shutdown(socket.SHUT_RDWR)` before `sock.close()` so Werkzeug never writes trailing HTTP bytes onto the WebSocket stream.
+- See [docs/CONSOLE.md](docs/CONSOLE.md) and [docs/ADMIN.md](docs/ADMIN.md) for full details.
 
 ---
 

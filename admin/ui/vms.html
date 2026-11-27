@@ -1,0 +1,153 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>CryoSpawn Admin - Global MicroVMs</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@xterm/xterm@5.5.0/css/xterm.min.css">
+    <script src="https://cdn.jsdelivr.net/npm/@xterm/xterm@5.5.0/lib/xterm.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@xterm/addon-fit@0.10.0/lib/addon-fit.min.js"></script>
+</head>
+<body class="min-h-screen bg-[#f0f7fc] text-[#0c2238] font-sans antialiased flex">
+    <aside id="admin-sidebar" class="w-64 bg-white/95 border-r border-sky-200 hidden md:flex flex-col shrink-0 min-h-screen"></aside>
+
+    <div class="flex-1 flex flex-col min-w-0">
+        <header class="md:hidden bg-white border-b border-sky-200 px-4 py-3 flex items-center justify-between gap-2">
+            <span class="font-bold text-sm">⚡ CryoSpawn Admin</span>
+            <button onclick="adminLogout()" class="text-xs font-semibold text-rose-700">Logout</button>
+        </header>
+        <div id="admin-mobile-nav" class="md:hidden flex gap-2 overflow-x-auto px-4 py-2 bg-sky-50/80 border-b border-sky-200"></div>
+
+        <main class="max-w-6xl w-full mx-auto p-5 sm:p-8 space-y-6">
+            <div>
+                <h1 class="text-2xl font-bold text-[#0c2238]">Global MicroVM Fleet</h1>
+                <p class="text-xs text-[#486581] mt-0.5">Manage every tenant's MicroVMs (?all=true), port exposure, and web consoles.</p>
+            </div>
+
+            <section class="bg-white rounded-2xl border border-sky-200 shadow-sm overflow-hidden">
+                <div class="px-5 py-4 border-b border-sky-100 flex flex-wrap items-center justify-between gap-3">
+                    <div id="vm-count-label" class="text-sm font-bold text-[#0c2238]">MicroVMs</div>
+                    <form id="admin-spawn-form" class="flex flex-wrap items-center gap-2">
+                        <input id="sp-name" type="text" placeholder="vm-name" required class="text-xs border border-sky-200 rounded-lg px-2.5 py-1.5 w-32">
+                        <input id="sp-owner" type="number" value="1" min="1" title="Owner User ID" class="text-xs border border-sky-200 rounded-lg px-2 py-1.5 w-16">
+                        <input id="sp-proj" type="text" value="default" placeholder="project" class="text-xs border border-sky-200 rounded-lg px-2.5 py-1.5 w-24">
+                        <label class="text-xs flex items-center gap-1"><input id="sp-ssh" type="checkbox" checked> SSH</label>
+                        <label class="text-xs flex items-center gap-1"><input id="sp-http" type="checkbox"> HTTP</label>
+                        <button type="submit" class="text-xs font-semibold px-3.5 py-1.5 rounded-lg bg-[#0b4f7c] text-white hover:bg-[#093e63]">+ Deploy VM</button>
+                    </form>
+                </div>
+                <div class="overflow-x-auto">
+                    <table class="w-full text-xs text-left">
+                        <thead class="bg-sky-50/70 text-[#486581] uppercase border-b border-sky-100">
+                            <tr>
+                                <th class="px-4 py-3">VM / Owner</th>
+                                <th class="px-4 py-3">Status</th>
+                                <th class="px-4 py-3">IP (/30)</th>
+                                <th class="px-4 py-3">Ports</th>
+                                <th class="px-4 py-3 text-right">Actions</th>
+                            </tr>
+                        </thead>
+                        <tbody id="admin-vm-tbody" class="divide-y divide-sky-100"></tbody>
+                    </table>
+                </div>
+            </section>
+        </main>
+    </div>
+
+    <!-- xterm.js Modal -->
+    <div id="admin-term-modal" class="fixed inset-0 bg-[#0c2238]/60 backdrop-blur-sm z-50 flex items-center justify-center hidden p-4">
+        <div class="bg-[#0f1b2d] border border-sky-800/70 rounded-2xl shadow-2xl max-w-5xl w-full h-[80vh] flex flex-col overflow-hidden">
+            <div class="px-4 py-3 border-b border-sky-900/70 flex items-center justify-between gap-2">
+                <div class="flex items-center gap-2 min-w-0">
+                    <span class="text-sky-400 font-mono text-sm font-bold">&gt;_</span>
+                    <h3 id="term-title" class="text-sm font-bold text-white truncate">Console</h3>
+                    <span id="term-status" class="text-[11px] font-semibold px-2.5 py-0.5 rounded-full">Connecting...</span>
+                </div>
+                <button onclick="closeAdminTerm()" class="text-slate-300 hover:text-white px-2 py-1 text-lg font-bold leading-none">&times;</button>
+            </div>
+            <div id="admin-xterm" class="flex-1 w-full min-h-0 bg-[#0c1624] p-2"></div>
+        </div>
+    </div>
+
+    <script src="/shared.js"></script>
+    <script>
+        renderAdminShell('vms');
+
+        async function loadVMs() {
+            const r = await api('/api/admin/daemon-api/vms');
+            const tbody = document.getElementById('admin-vm-tbody');
+            if (!r.ok) {
+                tbody.innerHTML = `<tr><td colspan="5" class="px-4 py-6 text-center text-[#486581] italic">Daemon offline — start the C++ daemon on Overview.</td></tr>`;
+                return;
+            }
+            const vms = await r.json();
+            document.getElementById('vm-count-label').textContent = `MicroVMs (${vms.length})`;
+            if (!vms.length) {
+                tbody.innerHTML = `<tr><td colspan="5" class="px-4 py-6 text-center text-[#486581] italic">No MicroVMs deployed across any user.</td></tr>`;
+                return;
+            }
+            tbody.innerHTML = vms.map(vm => `
+                <tr class="hover:bg-sky-50/40">
+                    <td class="px-4 py-3">
+                        <div class="font-bold text-[#0c2238]">${esc(vm.name)} <span class="text-[10px] font-mono text-[#486581]">(${esc(vm.uuid)})</span></div>
+                        <div class="text-[11px] text-[#486581]">Owner #${vm.owner_id} &bull; Project: ${esc(vm.project)}</div>
+                    </td>
+                    <td class="px-4 py-3 font-semibold">${esc(vm.status)}</td>
+                    <td class="px-4 py-3 font-mono">${esc(vm.ip)}</td>
+                    <td class="px-4 py-3 space-x-2">
+                        <label><input type="checkbox" ${vm.ssh_exposed ? 'checked' : ''} onchange="togglePort('${esc(vm.uuid)}', this.checked, ${!!vm.http_exposed}, ${!!vm.https_exposed})"> SSH</label>
+                        <label><input type="checkbox" ${vm.http_exposed ? 'checked' : ''} onchange="togglePort('${esc(vm.uuid)}', ${!!vm.ssh_exposed}, this.checked, ${!!vm.https_exposed})"> HTTP</label>
+                    </td>
+                    <td class="px-4 py-3 text-right space-x-1">
+                        ${vm.ssh_exposed ? `<button onclick="openAdminTerm('/ws/admin/console/${encodeURIComponent(vm.uuid)}', '${esc(vm.name)} (${esc(vm.uuid)})')" class="px-2.5 py-1 rounded bg-sky-100 text-sky-900 font-semibold border border-sky-300">&gt;_ Console</button>` : ''}
+                        ${vm.status === 'running'
+                            ? `<button onclick="vmPost('${esc(vm.uuid)}', 'hibernate')" class="px-2.5 py-1 rounded bg-amber-50 text-amber-800 border border-amber-200 font-semibold">Hibernate</button>`
+                            : `<button onclick="vmPost('${esc(vm.uuid)}', 'wake')" class="px-2.5 py-1 rounded bg-emerald-50 text-emerald-800 border border-emerald-200 font-semibold">Wake</button>`}
+                        <button onclick="vmPost('${esc(vm.uuid)}', 'restart')" class="px-2.5 py-1 rounded bg-slate-100 text-slate-800 border border-slate-200 font-semibold">Restart</button>
+                        <button onclick="vmDelete('${esc(vm.uuid)}')" class="px-2.5 py-1 rounded bg-rose-50 text-rose-700 border border-rose-200 font-semibold">Delete</button>
+                    </td>
+                </tr>
+            `).join('');
+        }
+
+        async function vmPost(uuid, act) {
+            await api(`/api/admin/daemon-api/vms/${encodeURIComponent(uuid)}/${act}`, { method: 'POST' });
+            loadVMs();
+        }
+        async function vmDelete(uuid) {
+            if (!confirm(`Delete ${uuid}?`)) return;
+            await api(`/api/admin/daemon-api/vms/${encodeURIComponent(uuid)}`, { method: 'DELETE' });
+            loadVMs();
+        }
+        async function togglePort(uuid, ssh, http, https) {
+            await api(`/api/admin/daemon-api/vms/${encodeURIComponent(uuid)}/ports`, {
+                method: 'PATCH',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ ssh_exposed: ssh, http_exposed: http, https_exposed: https })
+            });
+            loadVMs();
+        }
+
+        document.getElementById('admin-spawn-form').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            await api('/api/admin/daemon-api/vms', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    name: document.getElementById('sp-name').value.trim(),
+                    owner_id: parseInt(document.getElementById('sp-owner').value, 10) || 1,
+                    project: document.getElementById('sp-proj').value.trim() || 'default',
+                    expose_ssh: document.getElementById('sp-ssh').checked,
+                    expose_http: document.getElementById('sp-http').checked
+                })
+            });
+            document.getElementById('sp-name').value = '';
+            loadVMs();
+        });
+
+        loadVMs();
+        setInterval(loadVMs, 3000);
+    </script>
+</body>
+</html>

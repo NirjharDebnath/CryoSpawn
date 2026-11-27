@@ -38,28 +38,6 @@ server {
         proxy_read_timeout 3600s;
     }
 }
-
-# 3. MicroVM Dynamic Ingress (HTTPS Port 443)
-server {
-    listen 443;
-    server_name "~^(?:cryo-)?(?<vmhex>[a-f0-9]{8})\.(?<domain>.+)$" ~^vm(?<vmid>\d+)\.cryo$;
-
-    location / {
-        set $sock "/tmp/cryo-${vmhex}_443.sock";
-        if ($vmhex = "") {
-            set $sock "/tmp/cryo_vm_${vmid}_443.sock";
-        }
-
-        proxy_pass https://unix:$sock;
-        proxy_set_header Host $host;
-        proxy_set_header X-Real-IP $remote_addr;
-        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-        proxy_http_version 1.1;
-        proxy_set_header Upgrade $http_upgrade;
-        proxy_set_header Connection "upgrade";
-        proxy_ssl_verify off;
-    }
-}
 EOF'
 
 # Ensure systemd nginx service can read /tmp/cryo-*.sock (disable PrivateTmp)

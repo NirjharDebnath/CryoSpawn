@@ -1,195 +1,76 @@
-# 🛠️ Setup Guide
+# 🛠️ Setup & Quick Start Guide
 
-> **Written for:** developers and operators who want to build and run the CryoSpawn daemon on a Linux machine.
-
-## 📦 Prerequisites
-
-CryoSpawn manages Firecracker MicroVMs, TAP devices and `iptables` rules, so it only runs on Linux and needs root.
+## 📦 Prerequisites (Linux with KVM)
 
 | Requirement | Used for |
 | :--- | :--- |
-| Linux with KVM (`/dev/kvm`) | Firecracker virtualization |
-| `firecracker` on `PATH` | Launched by the daemon for every VM |
-| `g++` with C++17, `libsqlite3-dev` | Building the daemon |
-| `iproute2` (`ip`), `iptables` | TAP devices, NAT and firewall rules |
-| `e2fsprogs` (`e2fsck`, `resize2fs`, `mkfs.ext4`), `truncate` | Root disk expansion and volumes |
-| Python 3 with `flask` and `requests` | The login and dashboard frontend ([frontend/app.py](../frontend/app.py)) |
-| `nginx` (optional) | `cryo-<hex>.cryo` browser ingress |
-| `nc` (optional) | SSH through a Unix socket |
-| Uncompressed kernel (`vmlinux/ubuntu-vmlinux.bin`) | Guest kernel |
-| Template root disk (`rootfs/ubuntu-rootfs.ext4`) | Copied for every VM |
+| Linux with `/dev/kvm` | Firecracker hardware virtualization |
+| `firecracker` on `PATH` | MicroVM hypervisor |
+| `g++` (C++17), `libsqlite3-dev` | Building the C++ daemon |
+| `iproute2` (`ip`), `iptables` | TAP interfaces, NAT, and zero-trust firewall rules |
+| `e2fsprogs` (`e2fsck`, `resize2fs`, `mkfs.ext4`), `truncate` | RootFS expansion & Elastic Volumes |
+| Python 3 with `flask`, `requests`, `werkzeug` | Tenant frontend (`:8080`) and God-Mode Admin (`:9091`) |
+| `ssh`, `nc` (`netcat-openbsd`) | In-browser `xterm.js` Web Console |
+| `nginx`, `cloudflared` (optional) | Public wildcard HTTPS ingress (`*.yourdomain.com`) |
 
-The kernel and root disk are not part of the repository. Download them for a supported x86_64 or aarch64 host:
+---
 
-```bash
-./utils/download_assets.sh
-```
-
-The script writes `vmlinux/ubuntu-vmlinux.bin` and `rootfs/ubuntu-rootfs.ext4`.
-
-## 🗂️ Project layout on disk
-
-The daemon locates its project root from the path of its own binary (`config::BASE_PATH` in [internal/config.hpp](../internal/config.hpp)): if the binary sits in `internal/`, the root is the folder above it, otherwise the folder containing the binary. No path needs editing.
-
-| Path under the project root | What the daemon expects |
-| :--- | :--- |
-| `vmlinux/ubuntu-vmlinux.bin` | Guest kernel (you provide it) |
-| `rootfs/ubuntu-rootfs.ext4` | Template root disk (you provide it) |
-| `instances/`, `volumes/` | Created automatically |
-
-> [!IMPORTANT]
-> The SQLite file is opened as `cryospawn.db` **relative to the current directory**, while the Flask frontend opens `cryospawn.db` in the project root. Start the daemon from the project root so both processes share one database.
-
-## 🔨 Build
-
-From the `internal/` directory (also in [utils/cryo_server_compile.sh](../utils/cryo_server_compile.sh)):
+## 🔨 Build & Download Assets
 
 ```bash
+# 1. Build the C++ daemon
+cd internal
 g++ -std=c++17 main.cpp -o cryospawn -pthread -lsqlite3
-```
+cd ..
 
-Install the frontend dependencies once:
+# 2. Download kernel & base rootfs (if not already in vmlinux/ and rootfs/)
+bash utils/download_assets.sh
 
-```bash
+# 3. Install Python dependencies in your virtualenv
 pip install flask requests
 ```
 
-## ▶️ Run
+---
 
-CryoSpawn is two processes. Start them from the project root, each in its own terminal.
+## ▶️ Running CryoSpawn
 
-1. Daemon (needs root):
+### Option A: With the God-Mode Admin Panel (Recommended)
 
+1. **Terminal 1 — God-Mode Admin Panel (`0.0.0.0:9091`, runs as `root`):**
    ```bash
-   sudo ./internal/cryospawn
+   sudo CRYOSPAWN_ADMIN_PASSWORD="your-strong-password" ../einsteinenv/bin/python admin/app.py
    ```
+   Open `http://<host-lan-ip>:9091` (or `http://127.0.0.1:9091`), sign in as `hostadmin`, pick your Kernel & RootFS in **RootFS Studio**, and click **Start** on the daemon.
 
-2. Dashboard and login frontend:
-
+2. **Terminal 2 — Tenant Dashboard (`0.0.0.0:8080`):**
    ```bash
+   export CRYOSPAWN_SECRET_KEY="$(python3 -c 'import secrets; print(secrets.token_hex(32))')"
+   export CRYOSPAWN_PUBLIC_DOMAIN="zibai.space"   # optional
    python frontend/app.py
    ```
 
-The daemon:
-
-1. Detects the default network interface and installs the firewall baseline.
-2. Opens (or creates) `cryospawn.db` in the current directory and re-adopts VMs recorded there.
-3. Serves the REST API on `127.0.0.1:9090` only.
-
-The frontend creates the `users` table, serves the dashboard on `0.0.0.0:8080` and forwards `/api/*` to the daemon.
-
-### Configuration
-
-| Variable or option | Default | Purpose |
-| :--- | :--- | :--- |
-| `CRYOSPAWN_BASE_PATH` | Directory containing the daemon binary | Project root |
-| `CRYOSPAWN_KERNEL_PATH` | `<base>/vmlinux/ubuntu-vmlinux.bin` | Guest kernel |
-| `CRYOSPAWN_ROOTFS_PATH` | `<base>/rootfs/ubuntu-rootfs.ext4` | Template root disk |
-| `CRYOSPAWN_DB_PATH` | `<base>/cryospawn.db` | Shared SQLite database |
-| `CRYOSPAWN_BACKEND_PORT` / `--port` | `9090` | Loopback daemon port |
-| `CRYOSPAWN_SECRET_KEY` | Random on every Flask start | Stable Flask session signing key |
-| `CRYOSPAWN_INTERNAL_SECRET` | Empty | Require a shared secret on daemon API requests |
-| `CRYOSPAWN_FRONTEND_PORT` | `8080` | Flask listen port |
-
-Set the internal secret in both processes when using the Flask proxy:
+### Option B: Standalone Daemon + Frontend
 
 ```bash
-export CRYOSPAWN_INTERNAL_SECRET="$(openssl rand -hex 32)"
-export CRYOSPAWN_SECRET_KEY="$(openssl rand -hex 32)"
-sudo -E ./internal/cryospawn
+# Terminal 1: C++ daemon (root)
+sudo ./internal/cryospawn
+
+# Terminal 2: Tenant dashboard
 python frontend/app.py
 ```
 
-## 🔑 First login
+---
 
-Open `http://localhost:8080`. You are redirected to `/login`.
+## 🔑 First Login & Preparing a Guest RootFS
 
-| Field | Default |
-| :--- | :--- |
-| Username | `admin` |
-| Password | `admin123` |
+* Open `http://localhost:8080` (first-start default: `admin` / `admin123`—change or remove it via **Settings** or the Admin Panel's **Users & SQLite** page).
+* For **Ubuntu 24.04 Minimal** (`ubuntu-24.04-minimal.ext4`), pair it with **`vmlinux-6.18.51`** in **RootFS Studio**, resize to `3 GB` if installing dev tools, and run [`utils/setup_guest_devtools.sh`](../utils/setup_guest_devtools.sh) inside **`>_ Chroot`** to configure DNS (`1.1.1.1`), `ssh.service`, GCC/G++, Python 3, `nc`, `setsid`, `nano`, and `neofetch`.
 
-The account is created only when the `users` table is empty. Use the Settings page's password-change form, or update the account with SQLite:
+---
 
-```bash
-python - <<'PY'
-import sqlite3
-from werkzeug.security import generate_password_hash
-c = sqlite3.connect("cryospawn.db")
-c.execute("UPDATE users SET password_hash=? WHERE username='admin'", (generate_password_hash("a-new-password"),))
-c.commit()
-PY
-```
-
-> [!WARNING]
-> Set `CRYOSPAWN_SECRET_KEY` and `CRYOSPAWN_INTERNAL_SECRET` before exposing the dashboard. The built-in Flask server is intended for development, not internet-facing production use. See [KNOWN-ISSUES.md](KNOWN-ISSUES.md).
-
-The dashboard has four pages: MicroVMs (`/dashboard`), Elastic Volumes (`/volumes`), Routing & Mesh (`/networks`) and Settings (`/settings`). You can also use the [HTTP API](API.md).
-
-## ☁️ Share the dashboard with a Cloudflare tunnel
-
-Only the Flask port (`8080`) is meant to be exposed. The API on `127.0.0.1:9090` stays local, and Flask checks the login session before forwarding `/api/*` to it.
-
-1. Start the daemon and the frontend as described in [Run](#️-run).
-
-2. Open a quick tunnel to the dashboard port:
-
-   ```bash
-   cloudflared tunnel --url http://localhost:8080
-   ```
-
-3. Share the `https://<random-words>.trycloudflare.com` URL that `cloudflared` prints.
-
-> [!WARNING]
-> Never tunnel port `9090`: it has no login. Change the default `admin` password first, because anyone with the tunnel URL can reach the login page. See [KNOWN-ISSUES.md](KNOWN-ISSUES.md).
-
-## 🌐 Reach a VM from the host
-
-### Browser (HTTP) through Nginx
-
-Each VM has a UUID such as `vm-da05a06c`. Its HTTP socket is `/tmp/cryo-da05a06c_80.sock` (the UUID without the `vm-` prefix), and the host name is `cryo-da05a06c.cryo`.
-
-1. Install an Nginx server block that maps `cryo-<hex>.cryo` to `/tmp/cryo-<hex>_80.sock`. The example config is in [DESIGN.md](../DESIGN.md#nginx-ingress-cryo-hexcryo--local-dns).
-2. Add a hosts entry for each VM:
-
-   ```bash
-   echo "127.0.0.1 cryo-da05a06c.cryo" | sudo tee -a /etc/hosts
-   ```
-
-3. Create the VM with HTTP enabled, start a web server inside it (see [utils/start_vm_server.sh](../utils/start_vm_server.sh)), and open `http://cryo-da05a06c.cryo`.
-
-> [!WARNING]
-> [nginx/server.sh](../nginx/server.sh) still writes the older `vmN.cryo` pattern and `/tmp/cryo_vm_N_80.sock` socket names, which no longer match what the daemon creates. See [KNOWN-ISSUES.md](KNOWN-ISSUES.md).
-
-For a public, wildcard-domain setup with Cloudflare, see [DNS.md](DNS.md).
-
-### SSH
-
-Create the VM with SSH enabled, then:
+## 🧪 Running Tests
 
 ```bash
-ssh -o ProxyCommand="nc -U /tmp/cryo-da05a06c_22.sock" root@localhost
+bash tests/run_tests.sh
+PYTHONPATH=".venv/lib/python3.12/site-packages:." python3.12 -m unittest tests/test_admin_panel.py tests/test_frontend_auth.py
 ```
-
-The dashboard's copy button builds this command for you.
-
-## 🧹 Cleanup helpers
-
-| Script | Purpose |
-| :--- | :--- |
-| [utils/delete_tap.sh](../utils/delete_tap.sh) | Deletes every host network interface whose name starts with `cryo` (use after a crash) |
-| [utils/loopback.sh](../utils/loopback.sh) | Example `/etc/hosts` entry (uses the older `vm0.cryo` naming) |
-
-## 🩺 Troubleshooting
-
-| Symptom | Likely cause |
-| :--- | :--- |
-| VM stays in `booting` | Missing kernel or root disk under the project root, or `firecracker` is not on `PATH` |
-| `Cannot open database` on start | The working directory is not writable |
-| Dashboard redirects to `/login` forever | Wrong credentials, or the `users` table lives in a different `cryospawn.db` than you expect |
-| `502 C++ backend unavailable` | The daemon is not running on `127.0.0.1:9090` |
-| Page or API call returns `401` | The session expired: log in again |
-| `cryo-<hex>.cryo` does not load | Missing hosts entry, Nginx not pointing at `/tmp/cryo-<hex>_80.sock`, or HTTP is off for the VM |
-| Stale `cryo-...` interfaces after a crash | Run `utils/delete_tap.sh` |
-
-For how the pieces fit together, see [DESIGN.md](../DESIGN.md).

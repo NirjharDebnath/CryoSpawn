@@ -1,148 +1,91 @@
-# CryoSpawn HTTP API
+# 🔌 CryoSpawn HTTP & WebSocket API
 
-CryoSpawn exposes two HTTP layers:
+CryoSpawn exposes three local/private service layers:
 
-| Layer | Address | Purpose |
+| Layer | Address | Role |
 | :--- | :--- | :--- |
-| Flask frontend | `0.0.0.0:8080` | Login, sessions, projects, dashboard pages, and `/api/*` proxy |
-| C++ daemon | `127.0.0.1:9090` | VM, link, routing, and volume operations |
+| **Tenant Frontend** (`frontend/app.py`) | `0.0.0.0:8080` | Session auth, serves `internal/ui/`, proxies `/api/*` with `X-User-ID` + `X-Role`, serves `xterm.js` `/ws/console/<uuid>` |
+| **C++ Daemon** (`internal/main.cpp`) | `127.0.0.1:9090` | Pure REST API managing Firecracker MicroVMs, Ghost Proxies, TAP links, and Elastic Volumes |
+| **God-Mode Admin** (`admin/app.py`) | `0.0.0.0:9091` | Private host controller for daemon lifecycle, RootFS/Kernel Studio, SQLite explorer, and `?all=true` management |
 
-Use the Flask port for normal clients. The daemon port is loopback-only and requires trusted identity headers.
+---
 
-## Conventions
+## 🔐 Tenant Authentication (`:8080`)
 
-- JSON request and response bodies use `application/json`.
-- A successful response is normally `200` or `201`; errors use a non-2xx status and `{"error":"..."}`.
-- VM identifiers are UUID strings such as `vm-da05a06c`. Numeric slot IDs are internal.
-- Non-admin sessions can act only on their own VMs and volumes.
-- The daemon accepts `X-User-ID` and `X-Role: admin|user`.
-- Set `CRYOSPAWN_INTERNAL_SECRET` on both processes to require `X-Internal-Secret` on daemon requests.
-
-## Authentication
-
-| Method | Endpoint | Description |
-| :--- | :--- | :--- |
-| `POST` | `/api/auth/login` | Login with `username` and `password`; creates a session cookie |
-| `POST` | `/api/auth/register` | Create a normal user (password must be at least 6 characters) |
-| `POST` | `/api/auth/change-password` | Change the current user's password |
-| `POST` | `/api/auth/logout` | Clear the session |
-| `GET` | `/api/auth/me` | Return the current user |
-
-```bash
-curl -c jar -X POST http://localhost:8080/api/auth/login \
-  -H 'Content-Type: application/json' \
-  -d '{"username":"admin","password":"admin123"}'
-```
-
-The first start creates `admin` / `admin123` if the `users` table is empty. Change this password immediately.
-
-## Projects
-
-| Method | Endpoint | Body | Description |
+| Method | Endpoint | Body | Response |
 | :--- | :--- | :--- | :--- |
-| `GET` | `/api/projects` | none | List projects for the session user |
-| `POST` | `/api/projects` | `{"name":"lab","description":"optional"}` | Create a project |
-| `GET` | `/api/projects/:name` | none | Return project details and VM counts |
-| `DELETE` | `/api/projects/:name` | none | Delete an empty project |
+| `POST` | `/api/auth/login` | `{"username": "...", "password": "..."}` | `{"status": "success", "role": "..."}` |
+| `POST` | `/api/auth/register` | `{"username": "...", "password": "..."}` | `{"status": "success", "role": "user"}` (`201`) |
+| `POST` | `/api/auth/change-password` | `{"current_password": "...", "new_password": "..."}` | `{"status": "success", "message": "..."}` |
+| `POST` | `/api/auth/logout` | — | `{"status": "success"}` |
+| `GET` | `/api/auth/me` | — | `{"user_id": 1, "username": "...", "role": "...", "public_domain": "..."}` |
+| `GET` | `/api/config` | — | `{"public_domain": "..."}` |
 
-Project names use 1-64 characters: letters, numbers, spaces, `.`, `_`, and `-`.
+---
 
-## MicroVMs
+## 📁 Projects (`:8080`)
 
-| Method | Endpoint | Description |
+| Method | Endpoint | Purpose |
 | :--- | :--- | :--- |
-| `GET` | `/api/vms` | List accessible VMs |
-| `GET` | `/api/vms/:uuid` | Get one VM |
-| `POST` | `/api/vms` | Create and boot a VM |
-| `DELETE` | `/api/vms/:uuid` | Terminate and remove a VM |
-| `POST` | `/api/vms/:uuid/hibernate` | Snapshot and stop a VM |
-| `POST` | `/api/vms/:uuid/wake` | Resume a snapshot or cold boot |
-| `POST` | `/api/vms/:uuid/start` | Alias for wake/start |
-| `POST` | `/api/vms/:uuid/restart` | Reboot an existing VM |
-| `PATCH` | `/api/vms/:uuid/ports` | Update SSH, HTTP, HTTPS, and routing exposure |
-| `PATCH` or `POST` | `/api/vms/:uuid/routing` | Update inter-project routing |
-| `POST` | `/api/vms/:uuid/proxy` | Create a custom Ghost Proxy |
+| `GET` | `/api/projects` | List owned projects with live VM counts |
+| `POST` | `/api/projects` | Create a project (`{"name": "...", "description": "..."}`) |
+| `GET` | `/api/projects/:name` | Get project summary |
+| `DELETE` | `/api/projects/:name` | Delete an empty project |
 
-### VM fields
+---
 
-`GET /api/vms` returns fields including `id`, `uuid`, `name`, `ip`, `host_ip`, `status`, `vcpus`, `mem_mib`, `rootfs_gb`, `tap_name`, `ssh_exposed`, `http_exposed`, `https_exposed`, `project`, `owner_id`, and `allow_interproject_routing`.
+## 🖥️ MicroVMs (`:8080` → `:9090`)
 
-Lifecycle statuses include `booting`, `running`, `hibernated`, `waking`, `stopped`, `restarting`, and `terminating`.
+Every VM endpoint requires a valid session (or `X-User-ID` / `X-Role` / `X-Internal-Secret` headers when calling `:9090` directly). Non-admins can only access their own VMs; admins can pass `?all=true` for global visibility.
 
-### Create a VM
-
-```bash
-curl -b jar -X POST http://localhost:8080/api/vms \
-  -H 'Content-Type: application/json' \
-  -d '{"name":"web-1","vcpus":2,"mem_mib":1024,"expose_http":true,"project":"lab","rootfs_gb":5}'
-```
-
-| Field | Type | Default | Limits |
-| :--- | :--- | :--- | :--- |
-| `name` | string | VM name uses a slot-derived default | 1-64 valid characters |
-| `vcpus` | integer | `1` | `1-32` |
-| `mem_mib` | integer | `512` | `128-65536` |
-| `expose_ssh` | boolean | `false` | Port 22 |
-| `expose_http` | boolean | `false` | Port 80 |
-| `expose_https` | boolean | `false` | Port 443 |
-| `project` | string | `"default"` | Valid project name |
-| `rootfs_gb` | integer | `3` | Minimum `3`, in GB |
-| `allow_interproject_routing` | boolean | `false` | Opts the VM into cross-project links |
-
-The create response is immediate with status `booting`. Poll `GET /api/vms/:uuid` until status is `running`.
-
-Admin-only VM creation can set `owner_id` when the request includes `?all=true`.
-
-### Restart, hibernate, and wake
-
-```bash
-curl -b jar -X POST http://localhost:8080/api/vms/vm-da05a06c/hibernate
-curl -b jar -X POST http://localhost:8080/api/vms/vm-da05a06c/wake
-curl -b jar -X POST http://localhost:8080/api/vms/vm-da05a06c/restart
-```
-
-Hibernation snapshots memory and CPU state. Wake or start resumes the snapshot when available, otherwise it performs a clean boot.
-
-### Update ports and routing
-
-```bash
-curl -b jar -X PATCH http://localhost:8080/api/vms/vm-da05a06c/ports \
-  -H 'Content-Type: application/json' \
-  -d '{"ssh_exposed":true,"http_exposed":true,"https_exposed":false}'
-```
-
-Port proxies use `/tmp/cryo-<hex>_<port>.sock`. Missing port fields retain their current values.
-
-### Custom proxy
-
-```bash
-curl -b jar -X POST http://localhost:8080/api/vms/vm-da05a06c/proxy \
-  -H 'Content-Type: application/json' \
-  -d '{"vm_port":3000,"host_port":13000}'
-```
-
-This creates `/tmp/cryo-da05a06c_3000.sock` and, when requested, binds `0.0.0.0:13000`.
-
-## Links
-
-Links require both VMs to belong to the caller, unless an admin uses `?all=true`. Cross-project links require routing enabled on both VMs.
-
-| Method | Endpoint | Body |
+| Method | Endpoint | Purpose |
 | :--- | :--- | :--- |
-| `GET` | `/api/links` | none |
-| `POST` | `/api/links` | `{"vm1_id":"vm-da05a06c","vm2_id":"vm-1b2c3d4e"}` |
-| `DELETE` | `/api/links/:uuid1/:uuid2` | none |
-| `DELETE` | `/api/links` | `{"vm1_id":"...","vm2_id":"..."}` |
+| `GET` | `/api/vms` | List VMs (`?all=true` for admin global view) |
+| `GET` | `/api/vms/:uuid` | Get single VM details |
+| `POST` | `/api/vms` | Create & boot a VM (`name`, `vcpus`, `mem_mib`, `rootfs_gb`, `project`, `expose_ssh`, `expose_http`, `expose_https`, `allow_interproject_routing`) |
+| `DELETE` | `/api/vms/:uuid` | Terminate VM and clean up TAP, sockets, disk, and snapshots |
+| `POST` | `/api/vms/:uuid/hibernate` | Snapshot RAM & CPU state to disk and stop Firecracker |
+| `POST` | `/api/vms/:uuid/wake` | Resume hibernated VM (or cold-boot if `stopped`) |
+| `POST` | `/api/vms/:uuid/start` | Alias for `/wake` |
+| `POST` | `/api/vms/:uuid/restart` | Reboot VM in place |
+| `PATCH` | `/api/vms/:uuid/ports` | Toggle `ssh_exposed`, `http_exposed`, `https_exposed` |
+| `PATCH` | `/api/vms/:uuid/routing` | Toggle `allow_interproject_routing` |
+| `POST` | `/api/vms/:uuid/proxy` | Start Ghost Proxy on `/tmp/cryo-<hex>_<vm_port>.sock` (and optional `0.0.0.0:<host_port>`) |
 
-## Volumes
+---
 
-| Method | Endpoint | Body |
+## 💻 Web Console (`:8080`)
+
+| Protocol / Method | Endpoint | Purpose |
 | :--- | :--- | :--- |
-| `GET` | `/api/volumes` | none |
-| `GET` | `/api/volumes/:id` | none |
-| `POST` | `/api/volumes` | `{"name":"data","size_gb":10}` |
-| `DELETE` | `/api/volumes/:id` | none |
-| `POST` | `/api/volumes/:id/attach` | `{"vm_id":"vm-da05a06c"}` |
-| `POST` | `/api/volumes/:id/detach` | none |
+| `GET` | `/console/:uuid` | Session-protected standalone `xterm.js` page |
+| `GET` (WebSocket) | `/ws/console/:uuid` | Authenticated RFC 6455 WebSocket bridged to PTY SSH via `/tmp/cryo-<hex>_22.sock` |
 
-Volume names use the same 1-64 character resource-name rules as VM names. Sizes range from 1-1000 GB. A volume can attach to at most one VM. Attaching or detaching reboots a running VM and invalidates a hibernated VM's snapshot so it cold-boots with the new drives.
+---
+
+## 🔗 Network Links & 💾 Volumes (`:8080` → `:9090`)
+
+| Method | Endpoint | Purpose |
+| :--- | :--- | :--- |
+| `GET` | `/api/links` | List active VM-to-VM links |
+| `POST` | `/api/links` | Link two VMs (`{"vm1_id": "<uuid>", "vm2_id": "<uuid>"}`) |
+| `DELETE` | `/api/links/:uuid1/:uuid2` | Unlink two VMs |
+| `GET` | `/api/volumes` | List Elastic Volumes |
+| `POST` | `/api/volumes` | Create volume (`{"name": "...", "size_gb": 2}`) |
+| `DELETE` | `/api/volumes/:id` | Delete unattached volume |
+| `POST` | `/api/volumes/:id/attach` | Attach volume (`{"vm_id": "<uuid>"}`) |
+| `POST` | `/api/volumes/:id/detach` | Detach volume |
+
+---
+
+## ⚡ God-Mode Admin API (`:9091`)
+
+All routes require an authenticated `cryospawn_admin_session` cookie (`POST /api/admin/login`).
+
+| Group | Endpoints |
+| :--- | :--- |
+| **Daemon Control** | `GET /api/admin/daemon/status`, `POST /api/admin/daemon/start\|stop\|restart`, `GET /api/admin/daemon/logs` |
+| **Telemetry & Emergency** | `GET /api/admin/telemetry`, `POST /api/admin/emergency/hibernate-all`, `POST /api/admin/emergency/cleanup-orphans` |
+| **Global Proxy** | `/api/admin/daemon-api/<path>` (auto-injects `X-Role: admin` & `?all=true`) |
+| **Kernel & RootFS Studio** | `GET /api/admin/kernel/list`, `POST /api/admin/kernel/select`, `GET /api/admin/rootfs/list`, `POST /api/admin/rootfs/select\|clone\|delete\|fix-dns\|resize`, `WS /ws/admin/rootfs-shell?image=<name>` |
+| **SQLite & Users** | `GET /api/admin/sqlite/tables`, `POST /api/admin/sqlite/query`, `POST /api/admin/users`, `DELETE /api/admin/users/:id` |

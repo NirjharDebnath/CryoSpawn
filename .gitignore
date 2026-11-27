@@ -17,3 +17,4 @@ volumes/
 internal/cryospawn
 __pycache__/
 *.pyc
+*.log

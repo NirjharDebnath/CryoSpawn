@@ -1,0 +1,139 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>CryoSpawn Admin - Overview &amp; Daemon</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="min-h-screen bg-[#f0f7fc] text-[#0c2238] font-sans antialiased flex">
+    <aside id="admin-sidebar" class="w-64 bg-white/95 border-r border-sky-200 hidden md:flex flex-col shrink-0 min-h-screen"></aside>
+
+    <div class="flex-1 flex flex-col min-w-0">
+        <header class="md:hidden bg-white border-b border-sky-200 px-4 py-3 flex items-center justify-between gap-2">
+            <span class="font-bold text-sm">⚡ CryoSpawn Admin</span>
+            <button onclick="adminLogout()" class="text-xs font-semibold text-rose-700">Logout</button>
+        </header>
+        <div id="admin-mobile-nav" class="md:hidden flex gap-2 overflow-x-auto px-4 py-2 bg-sky-50/80 border-b border-sky-200"></div>
+
+        <main class="max-w-6xl w-full mx-auto p-5 sm:p-8 space-y-6">
+            <div class="flex flex-wrap items-center justify-between gap-3">
+                <div>
+                    <h1 class="text-2xl font-bold text-[#0c2238]">Host Overview &amp; Daemon</h1>
+                    <p class="text-xs text-[#486581] mt-0.5">Control the C++ Firecracker daemon, inspect host resources, and run emergency actions.</p>
+                </div>
+                <div class="flex flex-wrap gap-2">
+                    <button onclick="emergencyHibernateAll()" class="text-xs font-semibold px-3 py-2 rounded-xl bg-amber-50 hover:bg-amber-100 text-amber-800 border border-amber-200">Emergency Hibernate All</button>
+                    <button onclick="cleanupOrphans()" class="text-xs font-semibold px-3 py-2 rounded-xl bg-sky-50 hover:bg-sky-100 text-[#0b4f7c] border border-sky-200">Cleanup Orphaned TAPs/Sockets</button>
+                </div>
+            </div>
+
+            <!-- Telemetry Cards -->
+            <div class="grid grid-cols-2 lg:grid-cols-4 gap-4">
+                <div class="bg-white rounded-2xl border border-sky-200 p-4 shadow-sm">
+                    <div class="text-xs text-[#486581] font-medium">CPU Load Avg</div>
+                    <div id="t-load" class="text-lg font-bold mt-1">-</div>
+                </div>
+                <div class="bg-white rounded-2xl border border-sky-200 p-4 shadow-sm">
+                    <div class="text-xs text-[#486581] font-medium">Host RAM</div>
+                    <div id="t-ram" class="text-lg font-bold mt-1">-</div>
+                </div>
+                <div class="bg-white rounded-2xl border border-sky-200 p-4 shadow-sm">
+                    <div class="text-xs text-[#486581] font-medium">Disk Free</div>
+                    <div id="t-disk" class="text-lg font-bold mt-1">-</div>
+                </div>
+                <div class="bg-white rounded-2xl border border-sky-200 p-4 shadow-sm">
+                    <div class="text-xs text-[#486581] font-medium">TAPs / Sockets</div>
+                    <div id="t-net" class="text-lg font-bold mt-1">-</div>
+                </div>
+            </div>
+
+            <!-- Daemon Control Card -->
+            <section class="bg-white rounded-2xl border border-sky-200 p-6 shadow-sm space-y-4">
+                <div class="flex flex-wrap items-center justify-between gap-3">
+                    <div>
+                        <div class="flex items-center gap-2.5">
+                            <h2 class="text-base font-bold text-[#0c2238]">C++ Hypervisor Daemon (:9090)</h2>
+                            <span id="daemon-pill" class="text-[11px] font-semibold px-2.5 py-0.5 rounded-full bg-slate-100 text-slate-700 border border-slate-200">Checking...</span>
+                        </div>
+                        <p id="daemon-meta" class="text-xs font-mono text-[#486581] mt-1">PID: -</p>
+                    </div>
+                    <div class="flex flex-wrap gap-2">
+                        <button onclick="daemonAction('start')" class="text-xs font-semibold px-3.5 py-2 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white">Start</button>
+                        <button onclick="daemonAction('restart')" class="text-xs font-semibold px-3.5 py-2 rounded-lg bg-[#0b4f7c] hover:bg-[#093e63] text-white">Restart</button>
+                        <button onclick="daemonAction('stop')" class="text-xs font-semibold px-3.5 py-2 rounded-lg bg-rose-600 hover:bg-rose-700 text-white">Stop</button>
+                        <a href="/rootfs" class="text-xs font-semibold px-3.5 py-2 rounded-lg bg-sky-50 hover:bg-sky-100 text-[#0b4f7c] border border-sky-200">Switch RootFS →</a>
+                    </div>
+                </div>
+
+                <div class="bg-slate-50 border border-sky-200 rounded-xl overflow-hidden">
+                    <div class="px-3.5 py-2 bg-sky-100/70 border-b border-sky-200 flex items-center justify-between text-xs font-semibold text-[#1e3a52]">
+                        <span>Live Daemon Output (logs/cryospawn.log)</span>
+                        <button onclick="loadDaemonLogs()" class="text-[11px] text-[#0b4f7c] hover:underline">Refresh</button>
+                    </div>
+                    <pre id="daemon-logs" class="text-slate-800 text-xs font-mono p-3.5 h-64 overflow-y-auto whitespace-pre-wrap leading-relaxed">Loading daemon logs...</pre>
+                </div>
+            </section>
+        </main>
+    </div>
+
+    <script src="/shared.js"></script>
+    <script>
+        renderAdminShell('overview');
+
+        async function refreshOverview() {
+            try {
+                const [dRes, tRes] = await Promise.all([
+                    api('/api/admin/daemon/status'),
+                    api('/api/admin/telemetry')
+                ]);
+                const d = await dRes.json();
+                const pill = document.getElementById('daemon-pill');
+                pill.textContent = d.running ? 'ONLINE' : 'OFFLINE';
+                pill.className = d.running
+                    ? 'text-[11px] font-semibold px-2.5 py-0.5 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200'
+                    : 'text-[11px] font-semibold px-2.5 py-0.5 rounded-full bg-rose-50 text-rose-700 border border-rose-200';
+                document.getElementById('daemon-meta').textContent =
+                    `PID: ${d.pid ?? 'none'} • HTTP: ${d.http_alive ? 'up' : 'down'} • Active RootFS: ${d.active_rootfs_name}`;
+
+                const t = await tRes.json();
+                document.getElementById('t-load').textContent = t.load_avg.join(' / ');
+                document.getElementById('t-ram').textContent = `${t.mem_used_mb} / ${t.mem_total_mb} MB`;
+                document.getElementById('t-disk').textContent = `${t.disk_free_gb} / ${t.disk_total_gb} GB`;
+                document.getElementById('t-net').textContent = `${t.taps.length} TAPs / ${t.sockets.length} socks`;
+            } catch (e) { console.error(e); }
+        }
+
+        async function loadDaemonLogs() {
+            const r = await api('/api/admin/daemon/logs');
+            const d = await r.json();
+            const el = document.getElementById('daemon-logs');
+            el.textContent = d.logs || '';
+            el.scrollTop = el.scrollHeight;
+        }
+
+        async function daemonAction(act) {
+            await api(`/api/admin/daemon/${act}`, { method: 'POST' });
+            await refreshOverview();
+            await loadDaemonLogs();
+        }
+
+        async function emergencyHibernateAll() {
+            if (!confirm('Hibernate all running VMs?')) return;
+            await api('/api/admin/emergency/hibernate-all', { method: 'POST' });
+            refreshOverview();
+        }
+
+        async function cleanupOrphans() {
+            const r = await api('/api/admin/emergency/cleanup-orphans', { method: 'POST' });
+            const d = await r.json();
+            alert(`Cleaned ${d.removed_taps.length} TAPs and ${d.removed_sockets.length} sockets.`);
+            refreshOverview();
+        }
+
+        refreshOverview();
+        loadDaemonLogs();
+        setInterval(() => { refreshOverview(); loadDaemonLogs(); }, 3000);
+    </script>
+</body>
+</html>

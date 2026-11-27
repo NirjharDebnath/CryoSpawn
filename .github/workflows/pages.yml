@@ -1,10 +1,15 @@
-name: Deploy site to GitHub Pages
+name: Deploy site and Zensical docs to GitHub Pages
 
 on:
   push:
     branches: [main]
     paths:
       - "site/**"
+      - "docs/**"
+      - "zensical.toml"
+      - "README.md"
+      - "DESIGN.md"
+      - "ROADMAP.md"
       - ".github/workflows/pages.yml"
   workflow_dispatch:
 
@@ -18,16 +23,39 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  deploy:
+  build_and_deploy:
     runs-on: ubuntu-latest
     environment:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
     steps:
       - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install Zensical
+        run: pip install zensical
+
+      - name: Sync root architecture docs into docs/
+        run: |
+          cp DESIGN.md docs/DESIGN.md
+          cp ROADMAP.md docs/ROADMAP.md
+
+      - name: Build Zensical documentation
+        run: zensical build
+
+      - name: Assemble combined GitHub Pages artifact (site + docs)
+        run: |
+          mkdir -p _pages/docs
+          cp -r site/. _pages/
+          cp -r _zensical_site/. _pages/docs/
+          touch _pages/.nojekyll
+
       - uses: actions/configure-pages@v5
       - uses: actions/upload-pages-artifact@v3
         with:
-          path: site
+          path: _pages
       - id: deployment
         uses: actions/deploy-pages@v4

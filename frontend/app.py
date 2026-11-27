@@ -6,6 +6,7 @@ import os
 import re
 import json
 import secrets
+import socket
 
 try:
     from frontend.ws_console import build_ws_accept, bridge_websocket_to_pty
@@ -476,10 +477,11 @@ def ws_console(vm_uuid):
         sock.sendall(handshake)
         bridge_websocket_to_pty(sock, uds_path, key_path=SSH_KEY_PATH)
     finally:
-        try:
-            sock.close()
-        except OSError:
-            pass
+        for fn in (lambda: sock.shutdown(socket.SHUT_RDWR), sock.close):
+            try:
+                fn()
+            except OSError:
+                pass
 
     return Response('', status=204)
 

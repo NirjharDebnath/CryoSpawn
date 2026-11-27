@@ -1,46 +1,28 @@
-# Known Issues and Operational Limits
+# 🐞 Known Issues & Architectural Status
 
-This list describes the current implementation rather than the roadmap.
+## ✅ Resolved Issues
 
-| Severity | Issue | Status | Guidance |
-| :--- | :--- | :--- | :--- |
-| High | Daemon port 9090 is trusted by identity headers | Open | Bind remains loopback-only. Set `CRYOSPAWN_INTERNAL_SECRET` on Flask and the daemon; never publish port 9090 |
-| High | Default admin credentials | Open | Change `admin123` immediately after first login |
-| High | Development server and unbounded network binding | Open | Flask's built-in server listens on `0.0.0.0:8080`; use a hardened reverse proxy for exposure |
-| Medium | Session key can rotate when the process restarts | Open | Set a stable `CRYOSPAWN_SECRET_KEY`; this invalidates existing sessions after restart if omitted |
-| Medium | Public DNS/Nginx files are examples, not a complete deployment | Open | Use the local Nginx instructions and verify socket names before exposing a domain |
-| Medium | `nginx/server.sh` and `utils/loopback.sh` use legacy names | Open | The current daemon uses `cryo-<hex>` and `/tmp/cryo-<hex>_<port>.sock`; update example configuration before use |
-| Medium | Test runner assumes Python 3.12 in `.venv` | Open | Create that environment or adjust `tests/run_tests.sh` for the installed Python |
-| Low | Guest assets are downloaded by script | External dependency | Run `utils/download_assets.sh`; the kernel and rootfs are not stored in Git |
-| Low | Snapshot support depends on Firecracker and guest/KVM compatibility | Open | Use matching x86/aarch64 assets and verify `/dev/kvm` |
-| Low | Full topology IaC, branching, cryptographic mesh, and admin telemetry | Planned | These features are roadmap items, not implemented services |
+| # | Issue | Resolution | Where |
+| :-: | :--- | :--- | :--- |
+| 1 | Hard-coded absolute paths | Dynamic `/proc/self/exe` discovery + `CRYOSPAWN_*` env vars + CLI flags (`--kernel`, `--rootfs`, `--port`) | `internal/config.hpp`, `internal/main.cpp` |
+| 2 | Multi-tenant isolation & auth | Session auth in `frontend/app.py`, `X-User-ID` / `X-Role` / `X-Internal-Secret` enforcement across all daemon routes | `frontend/app.py`, `internal/server.hpp` |
+| 3 | Ghost Proxy concurrency & `SIGPIPE` | Half-close (`SHUT_WR`), `MSG_NOSIGNAL`, `SIGPIPE` ignore, connection cap (`MAX_PROXY_CONNECTIONS`) | `internal/proxy.hpp` |
+| 4 | Nginx socket visibility & WebSockets | Added `Upgrade` / `Connection "upgrade"` headers and systemd `PrivateTmp=false` override | `nginx/server.sh` |
+| 5 | Werkzeug WebSocket `400` & `Invalid frame header` | Registered both `websocket=True` and `websocket=False`; added `sock.shutdown(SHUT_RDWR)` before `sock.close()` | `frontend/app.py`, `admin/daemon_routes.py`, `admin/rootfs_routes.py` |
+| 6 | Ubuntu 24.04 SSH hang on banner | Switched `ssh.socket` → `ssh.service` and paired Ubuntu 24.04 images with `vmlinux-6.18.51` | `admin/rootfs_routes.py`, `utils/setup_guest_devtools.sh` |
+| 7 | Daemon log buffering & TAP cleanup | Spawned daemon under `stdbuf -oL -eL`; updated TAP cleanup to `ip link delete <tap> type tun` | `admin/daemon_routes.py` |
 
-## Security boundaries
+---
 
-The Flask proxy is the supported external entry point. It validates login sessions, injects `X-User-ID` and `X-Role`, and forwards API requests to the loopback daemon.
+## ⚠️ Current Limitations & Operational Notes
 
-The daemon also enforces ownership checks for individual resources and validates an internal shared secret when `CRYOSPAWN_INTERNAL_SECRET` is configured. The shared secret is defense against local misuse only; it is not a replacement for process isolation or a production authentication system.
-
-Do not expose port 9090. Do not rely on CORS alone for authorization.
-
-## Resource and lifecycle caveats
-
-- VM resource limits are enforced by the API, but host disk and memory exhaustion are not subject to hard tenant quotas.
-- `?all=true` allows an admin to view or modify across owners. Its use on write routes should be deliberate.
-- Hibernating a VM requires snapshot support and can fail if Firecracker does not have enough permissions or compatible device state.
-- Volume attach/detach updates snapshot state and reboots or invalidates as appropriate. Treat it as a lifecycle operation, not a live hotplug guarantee.
-- Links can only be created for VMs with compatible ownership and routing policies.
-- There is no audited action log, tenant quota manager, or host-wide emergency control yet.
-
-## Fixed in the current implementation
-
-- VM, volume, and project creation now records the caller as owner.
-- VM and volume routes perform ownership checks.
-- Project names and resource names are validated.
-- SQLite writes use WAL mode and busy timeouts.
-- Firecracker proxy and TCP relay code uses positive-PID checks and close-safe relaying.
-- Snapshot and stopped states are preserved across daemon restarts.
-- Slot allocation reuses freed gaps.
-- The asset downloader creates a compatible kernel/rootfs for supported architectures.
-
-See [SETUP.md](SETUP.md) for hardening and operational details.
+1. **Custom `/api/vms/:uuid/proxy` `host_port` persistence:**
+   Custom TCP port mappings created via `POST /api/vms/:uuid/proxy` are kept in memory only and do not persist across daemon restarts (nor is there a UI form for custom TCP ports yet; HTTP/HTTPS apps should use port `80` through Nginx).
+2. **Ghost Proxy `FD_CLOEXEC`:**
+   An orphaned `firecracker` child process can hold onto a Ghost Proxy TCP port (such as `:2200`) if the daemon terminates unexpectedly, because Ghost Proxy sockets are not yet opened with `SOCK_CLOEXEC`.
+3. **Default `admin` auto-recreation:**
+   In [`frontend/app.py`](../frontend/app.py), `init_db()` auto-creates `admin` / `admin123` whenever the `users` table has `0` rows. Always create at least one non-default user account before deleting `admin`.
+4. **Kernel ↔ RootFS ABI pairing:**
+   `ubuntu-24.04-minimal*.ext4` requires `vmlinux-6.18.51`, while legacy `ubuntu-rootfs.ext4` requires `ubuntu-vmlinux.bin` (`4.14.174`). Always restart the daemon (and recreate/restart VMs) after switching kernels.
+5. **Flask development server:**
+   `frontend/app.py` and `admin/app.py` use Werkzeug's threaded development server (`threaded=True`). This works well for homelab use, while high-concurrency production deployments should front them with a production WSGI/ASGI server.

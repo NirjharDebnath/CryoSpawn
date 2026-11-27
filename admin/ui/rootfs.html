@@ -1,0 +1,347 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>CryoSpawn Admin - RootFS Studio</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@xterm/xterm@5.5.0/css/xterm.min.css">
+    <script src="https://cdn.jsdelivr.net/npm/@xterm/xterm@5.5.0/lib/xterm.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@xterm/addon-fit@0.10.0/lib/addon-fit.min.js"></script>
+</head>
+<body class="min-h-screen bg-[#f0f7fc] text-[#0c2238] font-sans antialiased flex">
+    <aside id="admin-sidebar" class="w-64 bg-white/95 border-r border-sky-200 hidden md:flex flex-col shrink-0 min-h-screen"></aside>
+
+    <div class="flex-1 flex flex-col min-w-0">
+        <header class="md:hidden bg-white border-b border-sky-200 px-4 py-3 flex items-center justify-between gap-2">
+            <span class="font-bold text-sm">⚡ CryoSpawn Admin</span>
+            <button onclick="adminLogout()" class="text-xs font-semibold text-rose-700">Logout</button>
+        </header>
+        <div id="admin-mobile-nav" class="md:hidden flex gap-2 overflow-x-auto px-4 py-2 bg-sky-50/80 border-b border-sky-200"></div>
+
+        <main class="max-w-6xl w-full mx-auto p-5 sm:p-8 space-y-6">
+            <div class="flex flex-wrap items-center justify-between gap-3">
+                <div>
+                    <h1 class="text-2xl font-bold text-[#0c2238]">RootFS Studio</h1>
+                    <p class="text-xs text-[#486581] mt-0.5">Manage multiple <code class="font-mono">.ext4</code> images, clone variants (Java, Python, C++), customize via chroot, and switch the active daemon image.</p>
+                </div>
+                <div id="active-rootfs-banner" class="text-xs font-semibold px-3 py-1.5 rounded-xl bg-emerald-50 text-emerald-800 border border-emerald-200">Active: -</div>
+            </div>
+
+            <!-- Kernel Selector -->
+            <section class="bg-white rounded-2xl border border-sky-200 p-5 shadow-sm flex flex-wrap items-center justify-between gap-3">
+                <div>
+                    <h2 class="text-sm font-bold text-[#0c2238]">Guest Linux Kernel (<code class="font-mono">vmlinux/</code>)</h2>
+                    <p class="text-xs text-[#486581]">Use <code class="font-mono">vmlinux-6.18.51</code> for Ubuntu 24.04 (4.14 <code class="font-mono">ubuntu-vmlinux.bin</code> is for legacy 18.04/22.04).</p>
+                </div>
+                <div class="flex flex-wrap items-center gap-2">
+                    <select id="kernel-select" class="text-xs border border-sky-200 rounded-lg px-3 py-2 bg-white font-mono"></select>
+                    <button onclick="selectKernel(true)" class="text-xs font-semibold px-3.5 py-2 rounded-lg bg-[#0b4f7c] hover:bg-[#093e63] text-white">Use Kernel &amp; Restart Daemon</button>
+                </div>
+            </section>
+
+            <!-- Clone Form -->
+            <section class="bg-white rounded-2xl border border-sky-200 p-5 shadow-sm">
+                <h2 class="text-sm font-bold text-[#0c2238] mb-3">Clone a RootFS Variant</h2>
+                <form id="clone-form" class="flex flex-wrap items-end gap-3">
+                    <div class="flex-1 min-w-[180px]">
+                        <label class="block text-xs font-semibold text-[#1e3a52] mb-1">Source Image</label>
+                        <select id="clone-source" class="w-full text-xs border border-sky-200 rounded-lg px-3 py-2 bg-white"></select>
+                    </div>
+                    <div class="flex-1 min-w-[180px]">
+                        <label class="block text-xs font-semibold text-[#1e3a52] mb-1">New Image Name</label>
+                        <input id="clone-target" type="text" placeholder="e.g. ubuntu-java.ext4" required class="w-full text-xs border border-sky-200 rounded-lg px-3 py-2">
+                    </div>
+                    <button type="submit" id="clone-btn" class="text-xs font-semibold px-4 py-2 rounded-lg bg-[#0b4f7c] hover:bg-[#093e63] text-white">+ Clone Image</button>
+                </form>
+            </section>
+
+            <!-- Images Table -->
+            <section class="bg-white rounded-2xl border border-sky-200 shadow-sm overflow-hidden">
+                <div class="px-5 py-4 border-b border-sky-100 flex items-center justify-between">
+                    <h2 class="text-base font-bold text-[#0c2238]">Available RootFS Images</h2>
+                    <button onclick="loadImages()" class="text-xs font-semibold px-3 py-1.5 rounded-lg bg-sky-50 border border-sky-200 text-[#0b4f7c]">Refresh</button>
+                </div>
+                <div class="overflow-x-auto">
+                    <table class="w-full text-xs text-left">
+                        <thead class="bg-sky-50/70 text-[#486581] uppercase border-b border-sky-100">
+                            <tr>
+                                <th class="px-5 py-3">Image</th>
+                                <th class="px-5 py-3">Size</th>
+                                <th class="px-5 py-3">Status</th>
+                                <th class="px-5 py-3 text-right">Actions</th>
+                            </tr>
+                        </thead>
+                        <tbody id="rootfs-tbody" class="divide-y divide-sky-100"></tbody>
+                    </table>
+                </div>
+            </section>
+        </main>
+    </div>
+
+    <!-- xterm.js Modal -->
+    <div id="admin-term-modal" class="fixed inset-0 bg-[#0c2238]/60 backdrop-blur-sm z-50 flex items-center justify-center hidden p-4">
+        <div class="bg-[#0f1b2d] border border-sky-800/70 rounded-2xl shadow-2xl max-w-5xl w-full h-[80vh] flex flex-col overflow-hidden">
+            <div class="px-4 py-3 border-b border-sky-900/70 flex items-center justify-between gap-2">
+                <div class="flex items-center gap-2 min-w-0">
+                    <span class="text-sky-400 font-mono text-sm font-bold">&gt;_</span>
+                    <h3 id="term-title" class="text-sm font-bold text-white truncate">Chroot Shell</h3>
+                    <span id="term-status" class="text-[11px] font-semibold px-2.5 py-0.5 rounded-full">Connecting...</span>
+                </div>
+                <button onclick="closeAdminTerm()" class="text-slate-300 hover:text-white px-2 py-1 text-lg font-bold leading-none">&times;</button>
+            </div>
+            <div id="admin-xterm" class="flex-1 w-full min-h-0 bg-[#0c1624] p-2"></div>
+        </div>
+    </div>
+
+    <script src="/shared.js"></script>
+    <script>
+        renderAdminShell('rootfs');
+
+        async function loadImages() {
+            const r = await api('/api/admin/rootfs/list');
+            const d = await r.json();
+            document.getElementById('active-rootfs-banner').textContent = `Active: ${d.active_name}`;
+
+            const sel = document.getElementById('clone-source');
+            const prev = sel.value;
+            sel.innerHTML = d.images.map(img => `<option value="${esc(img.name)}">${esc(img.name)} (${img.size_mb} MB)</option>`).join('');
+            if (prev && d.images.some(i => i.name === prev)) sel.value = prev;
+
+            const tbody = document.getElementById('rootfs-tbody');
+            if (!d.images.length) {
+                tbody.innerHTML = `<tr><td colspan="4" class="px-5 py-6 text-center text-[#486581] italic">No .ext4 images found in rootfs/.</td></tr>`;
+                return;
+            }
+            tbody.innerHTML = d.images.map(img => `
+                <tr class="hover:bg-sky-50/40">
+                    <td class="px-5 py-3">
+                        <div class="font-bold text-[#0c2238] font-mono">${esc(img.name)}</div>
+                        <div class="text-[11px] text-[#486581]">${esc(img.path)}</div>
+                    </td>
+                    <td class="px-5 py-3 font-mono">${img.size_mb} MB</td>
+                    <td class="px-5 py-3">
+                        ${img.active
+                            ? `<span class="px-2.5 py-0.5 rounded-full text-[10px] font-semibold bg-emerald-50 text-emerald-700 border border-emerald-200">ACTIVE</span>`
+                            : `<span class="px-2.5 py-0.5 rounded-full text-[10px] font-semibold bg-slate-100 text-slate-600 border border-slate-200">Standby</span>`}
+                    </td>
+                    <td class="px-5 py-3 text-right space-x-1">
+                        ${!img.active ? `<button onclick="selectAndRestart('${esc(img.name)}', false)" class="px-2.5 py-1 rounded bg-emerald-50 text-emerald-800 border border-emerald-200 font-semibold">Set Active</button>` : ''}
+                        <button onclick="selectAndRestart('${esc(img.name)}', true)" class="px-2.5 py-1 rounded bg-emerald-600 text-white font-semibold">Use &amp; Restart Daemon</button>
+                        <button onclick="fixDns('${esc(img.name)}')" class="px-2.5 py-1 rounded bg-sky-50 text-[#0b4f7c] border border-sky-200 font-semibold">Fix DNS</button>
+                        <button onclick="resizeImg('${esc(img.name)}')" class="px-2.5 py-1 rounded bg-slate-100 text-slate-800 border border-slate-200 font-semibold">Resize</button>
+                        <button onclick="openAdminTerm('/ws/admin/rootfs-shell?image=${encodeURIComponent(img.name)}', 'Chroot: ${esc(img.name)}')" class="px-2.5 py-1 rounded bg-[#0b4f7c] text-white font-semibold">&gt;_ Chroot</button>
+                        ${!img.active ? `<button onclick="deleteImg('${esc(img.name)}')" class="px-2.5 py-1 rounded bg-rose-50 text-rose-700 border border-rose-200 font-semibold">Delete</button>` : ''}
+                    </td>
+                </tr>
+            `).join('');
+        }
+
+        async function selectAndRestart(name, restart) {
+            const r = await api('/api/admin/rootfs/select', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ name })
+            });
+            const d = await r.json().catch(() => ({}));
+            if (!r.ok) { alert(d.error || 'Failed to select rootfs'); return; }
+            if (restart) {
+                await api('/api/admin/daemon/restart', { method: 'POST' });
+                alert(`Switched active RootFS to ${name} and restarted the C++ daemon.`);
+            }
+            async function loadKernels() {
+            const r = await api('/api/admin/kernel/list');
+            const d = await r.json();
+            const sel = document.getElementById('kernel-select');
+            sel.innerHTML = d.kernels.map(k =>
+                `<option value="${esc(k.name)}" ${k.active ? 'selected' : ''}>${esc(k.name)} (${k.size_mb} MB)${k.active ? ' [ACTIVE]' : ''}</option>`
+            ).join('');
+        }
+
+        async function selectKernel(restart) {
+            const name = document.getElementById('kernel-select').value;
+            const r = await api('/api/admin/kernel/select', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ name })
+            });
+            const d = await r.json().catch(() => ({}));
+            if (!r.ok) { alert(d.error || 'Failed to select kernel'); return; }
+            if (restart) {
+                await api('/api/admin/daemon/restart', { method: 'POST' });
+                alert(`Switched active Kernel to ${name} and restarted the C++ daemon.`);
+            }
+            loadKernels();
+        }
+
+        loadKernels();
+        loadImages();
+        }
+
+        async function fixDns(name) {
+            const r = await api('/api/admin/rootfs/fix-dns', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ name })
+            });
+            const d = await r.json().catch(() => ({}));
+            alert(r.ok ? `DNS (1.1.1.1 / 8.8.8.8) written to ${name}.` : (d.error || 'Fix DNS failed'));
+        }
+
+        async function resizeImg(name) {
+            const gb = prompt(`New size in GB for ${name}:`, '3');
+            if (!gb) return;
+            const r = await api('/api/admin/rootfs/resize', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ name, size_gb: parseInt(gb, 10) })
+            });
+            const d = await r.json().catch(() => ({}));
+            if (!r.ok) alert(d.error || 'Resize failed');
+            async function loadKernels() {
+            const r = await api('/api/admin/kernel/list');
+            const d = await r.json();
+            const sel = document.getElementById('kernel-select');
+            sel.innerHTML = d.kernels.map(k =>
+                `<option value="${esc(k.name)}" ${k.active ? 'selected' : ''}>${esc(k.name)} (${k.size_mb} MB)${k.active ? ' [ACTIVE]' : ''}</option>`
+            ).join('');
+        }
+
+        async function selectKernel(restart) {
+            const name = document.getElementById('kernel-select').value;
+            const r = await api('/api/admin/kernel/select', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ name })
+            });
+            const d = await r.json().catch(() => ({}));
+            if (!r.ok) { alert(d.error || 'Failed to select kernel'); return; }
+            if (restart) {
+                await api('/api/admin/daemon/restart', { method: 'POST' });
+                alert(`Switched active Kernel to ${name} and restarted the C++ daemon.`);
+            }
+            loadKernels();
+        }
+
+        loadKernels();
+        loadImages();
+        }
+
+        async function deleteImg(name) {
+            if (!confirm(`Permanently delete ${name}?`)) return;
+            const r = await api('/api/admin/rootfs/delete', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ name })
+            });
+            const d = await r.json().catch(() => ({}));
+            if (!r.ok) alert(d.error || 'Delete failed');
+            async function loadKernels() {
+            const r = await api('/api/admin/kernel/list');
+            const d = await r.json();
+            const sel = document.getElementById('kernel-select');
+            sel.innerHTML = d.kernels.map(k =>
+                `<option value="${esc(k.name)}" ${k.active ? 'selected' : ''}>${esc(k.name)} (${k.size_mb} MB)${k.active ? ' [ACTIVE]' : ''}</option>`
+            ).join('');
+        }
+
+        async function selectKernel(restart) {
+            const name = document.getElementById('kernel-select').value;
+            const r = await api('/api/admin/kernel/select', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ name })
+            });
+            const d = await r.json().catch(() => ({}));
+            if (!r.ok) { alert(d.error || 'Failed to select kernel'); return; }
+            if (restart) {
+                await api('/api/admin/daemon/restart', { method: 'POST' });
+                alert(`Switched active Kernel to ${name} and restarted the C++ daemon.`);
+            }
+            loadKernels();
+        }
+
+        loadKernels();
+        loadImages();
+        }
+
+        document.getElementById('clone-form').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const btn = document.getElementById('clone-btn');
+            btn.disabled = true;
+            btn.textContent = 'Cloning...';
+            try {
+                const r = await api('/api/admin/rootfs/clone', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        source: document.getElementById('clone-source').value,
+                        target: document.getElementById('clone-target').value.trim()
+                    })
+                });
+                const d = await r.json().catch(() => ({}));
+                if (!r.ok) alert(d.error || 'Clone failed');
+                else document.getElementById('clone-target').value = '';
+                async function loadKernels() {
+            const r = await api('/api/admin/kernel/list');
+            const d = await r.json();
+            const sel = document.getElementById('kernel-select');
+            sel.innerHTML = d.kernels.map(k =>
+                `<option value="${esc(k.name)}" ${k.active ? 'selected' : ''}>${esc(k.name)} (${k.size_mb} MB)${k.active ? ' [ACTIVE]' : ''}</option>`
+            ).join('');
+        }
+
+        async function selectKernel(restart) {
+            const name = document.getElementById('kernel-select').value;
+            const r = await api('/api/admin/kernel/select', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ name })
+            });
+            const d = await r.json().catch(() => ({}));
+            if (!r.ok) { alert(d.error || 'Failed to select kernel'); return; }
+            if (restart) {
+                await api('/api/admin/daemon/restart', { method: 'POST' });
+                alert(`Switched active Kernel to ${name} and restarted the C++ daemon.`);
+            }
+            loadKernels();
+        }
+
+        loadKernels();
+        loadImages();
+            } finally {
+                btn.disabled = false;
+                btn.textContent = '+ Clone Image';
+            }
+        });
+
+        async function loadKernels() {
+            const r = await api('/api/admin/kernel/list');
+            const d = await r.json();
+            const sel = document.getElementById('kernel-select');
+            sel.innerHTML = d.kernels.map(k =>
+                `<option value="${esc(k.name)}" ${k.active ? 'selected' : ''}>${esc(k.name)} (${k.size_mb} MB)${k.active ? ' [ACTIVE]' : ''}</option>`
+            ).join('');
+        }
+
+        async function selectKernel(restart) {
+            const name = document.getElementById('kernel-select').value;
+            const r = await api('/api/admin/kernel/select', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ name })
+            });
+            const d = await r.json().catch(() => ({}));
+            if (!r.ok) { alert(d.error || 'Failed to select kernel'); return; }
+            if (restart) {
+                await api('/api/admin/daemon/restart', { method: 'POST' });
+                alert(`Switched active Kernel to ${name} and restarted the C++ daemon.`);
+            }
+            loadKernels();
+        }
+
+        loadKernels();
+        loadImages();
+    </script>
+</body>
+</html>

@@ -1,0 +1,62 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>CryoSpawn God-Mode Admin - Login</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="min-h-screen bg-gradient-to-br from-[#e6f2fa] via-[#f4f9fd] to-[#dbeafe] flex items-center justify-center p-4 font-sans antialiased">
+    <div class="w-full max-w-md bg-white/90 backdrop-blur-md border border-sky-200 rounded-2xl shadow-xl p-7">
+        <div class="flex items-center gap-3 mb-6">
+            <div class="w-10 h-10 rounded-xl bg-[#0b4f7c] text-white flex items-center justify-center font-bold text-lg shadow-sm">⚡</div>
+            <div>
+                <h1 class="text-xl font-bold text-[#0c2238] leading-tight">CryoSpawn God-Mode</h1>
+                <p class="text-xs font-medium text-[#486581]">Host Controller &bull; Port 9091 (Private LAN)</p>
+            </div>
+        </div>
+
+        <form id="admin-login-form" class="space-y-4">
+            <div>
+                <label for="username" class="block text-xs font-semibold text-[#1e3a52] mb-1">Admin Username</label>
+                <input id="username" type="text" value="hostadmin" required class="w-full rounded-lg border border-sky-200 bg-white px-3 py-2 text-sm text-[#0c2238] focus:outline-none focus:ring-2 focus:ring-[#0b4f7c]">
+            </div>
+            <div>
+                <label for="password" class="block text-xs font-semibold text-[#1e3a52] mb-1">Password</label>
+                <input id="password" type="password" required placeholder="Enter host admin password" class="w-full rounded-lg border border-sky-200 bg-white px-3 py-2 text-sm text-[#0c2238] focus:outline-none focus:ring-2 focus:ring-[#0b4f7c]">
+            </div>
+            <div id="login-error" class="hidden text-xs font-semibold text-rose-700 bg-rose-50 border border-rose-200 rounded-lg px-3 py-2"></div>
+            <button type="submit" class="w-full bg-[#0b4f7c] hover:bg-[#093e63] text-white font-semibold py-2.5 rounded-lg text-sm transition-colors shadow-sm">
+                Sign In to Host Controller
+            </button>
+        </form>
+    </div>
+
+    <script>
+        document.getElementById('admin-login-form').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const errEl = document.getElementById('login-error');
+            errEl.classList.add('hidden');
+            const username = document.getElementById('username').value.trim();
+            const password = document.getElementById('password').value;
+            try {
+                const res = await fetch('/api/admin/login', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ username, password })
+                });
+                const data = await res.json().catch(() => ({}));
+                if (!res.ok) {
+                    errEl.textContent = data.error || 'Authentication failed';
+                    errEl.classList.remove('hidden');
+                    return;
+                }
+                window.location.href = '/';
+            } catch (err) {
+                errEl.textContent = 'Network error: ' + err.message;
+                errEl.classList.remove('hidden');
+            }
+        });
+    </script>
+</body>
+</html>

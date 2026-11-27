@@ -1,0 +1,213 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>CryoSpawn Admin - Users &amp; SQLite</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="min-h-screen bg-[#f0f7fc] text-[#0c2238] font-sans antialiased flex">
+    <aside id="admin-sidebar" class="w-64 bg-white/95 border-r border-sky-200 hidden md:flex flex-col shrink-0 min-h-screen"></aside>
+
+    <div class="flex-1 flex flex-col min-w-0">
+        <header class="md:hidden bg-white border-b border-sky-200 px-4 py-3 flex items-center justify-between gap-2">
+            <span class="font-bold text-sm">⚡ CryoSpawn Admin</span>
+            <button onclick="adminLogout()" class="text-xs font-semibold text-rose-700">Logout</button>
+        </header>
+        <div id="admin-mobile-nav" class="md:hidden flex gap-2 overflow-x-auto px-4 py-2 bg-sky-50/80 border-b border-sky-200"></div>
+
+        <main class="max-w-6xl w-full mx-auto p-5 sm:p-8 space-y-6">
+            <div>
+                <h1 class="text-2xl font-bold text-[#0c2238]">Users &amp; SQLite Database</h1>
+                <p class="text-xs text-[#486581] mt-0.5" id="sqlite-db-path">Manage user accounts, browse all tables, and execute SQL queries.</p>
+            </div>
+
+            <!-- User Management -->
+            <section class="bg-white rounded-2xl border border-sky-200 p-5 shadow-sm space-y-4">
+                <h2 class="text-base font-bold text-[#0c2238]">User Accounts</h2>
+                <form id="admin-user-form" class="flex flex-wrap gap-2">
+                    <input id="u-name" type="text" placeholder="username" required class="text-xs border border-sky-200 rounded-lg px-2.5 py-1.5 flex-1 min-w-[120px]">
+                    <input id="u-pass" type="password" placeholder="password (>=6)" required class="text-xs border border-sky-200 rounded-lg px-2.5 py-1.5 flex-1 min-w-[130px]">
+                    <select id="u-role" class="text-xs border border-sky-200 rounded-lg px-2.5 py-1.5"><option value="user">user</option><option value="admin">admin</option></select>
+                    <button type="submit" class="text-xs font-semibold px-4 py-1.5 rounded-lg bg-[#0b4f7c] text-white">+ Add User</button>
+                </form>
+                <div class="overflow-x-auto border border-sky-100 rounded-xl">
+                    <table class="w-full text-xs text-left">
+                        <thead class="bg-sky-50/70 text-[#486581] uppercase border-b border-sky-100">
+                            <tr>
+                                <th class="px-4 py-2.5">ID</th>
+                                <th class="px-4 py-2.5">Username</th>
+                                <th class="px-4 py-2.5">Role</th>
+                                <th class="px-4 py-2.5 text-right">Action</th>
+                            </tr>
+                        </thead>
+                        <tbody id="users-tbody" class="divide-y divide-sky-100"></tbody>
+                    </table>
+                </div>
+            </section>
+
+            <!-- SQLite Explorer + Custom SQL -->
+            <section class="bg-white rounded-2xl border border-sky-200 shadow-sm overflow-hidden">
+                <div class="px-5 py-4 border-b border-sky-100 flex flex-wrap items-center justify-between gap-3">
+                    <h2 class="text-base font-bold text-[#0c2238]">SQLite Explorer</h2>
+                    <div class="flex flex-wrap items-center gap-2">
+                        <div id="sqlite-tabs" class="flex flex-wrap gap-1.5"></div>
+                        <button onclick="loadSqlite()" class="text-xs font-semibold px-3 py-1.5 rounded-lg bg-sky-50 border border-sky-200 text-[#0b4f7c]">Refresh DB</button>
+                    </div>
+                </div>
+                <div id="sqlite-table-wrap" class="overflow-x-auto"></div>
+
+                <div class="border-t border-sky-200 bg-sky-50/40 p-5 space-y-3">
+                    <div class="flex flex-wrap items-center justify-between gap-2">
+                        <div>
+                            <h3 class="text-sm font-bold text-[#0c2238]">Custom SQL Console</h3>
+                            <p class="text-[11px] text-[#486581]">Run any SQL query or script on <code class="font-mono">cryospawn.db</code> (Ctrl+Enter to run).</p>
+                        </div>
+                        <div class="flex flex-wrap gap-1.5">
+                            <button type="button" onclick="setSqlPreset('SELECT * FROM vms;')" class="text-[11px] font-mono px-2 py-1 rounded bg-white border border-sky-200 text-[#0b4f7c]">vms</button>
+                            <button type="button" onclick="setSqlPreset('SELECT id, username, role FROM users;')" class="text-[11px] font-mono px-2 py-1 rounded bg-white border border-sky-200 text-[#0b4f7c]">users</button>
+                            <button type="button" onclick="setSqlPreset('PRAGMA table_info(vms);')" class="text-[11px] font-mono px-2 py-1 rounded bg-white border border-sky-200 text-[#0b4f7c]">schema</button>
+                        </div>
+                    </div>
+                    <textarea id="sql-input" rows="3" placeholder="SELECT * FROM vms;" class="w-full font-mono text-xs bg-white border border-sky-200 rounded-xl p-3 text-[#0c2238] focus:outline-none focus:ring-2 focus:ring-[#0b4f7c]"></textarea>
+                    <div class="flex items-center gap-2">
+                        <button type="button" onclick="runCustomSql()" class="text-xs font-semibold px-4 py-1.5 rounded-lg bg-[#0b4f7c] hover:bg-[#093e63] text-white">Run SQL</button>
+                        <button type="button" onclick="document.getElementById('sql-input').value=''; document.getElementById('sql-result').innerHTML='';" class="text-xs font-semibold px-3 py-1.5 rounded-lg bg-white border border-sky-200 text-[#486581]">Clear</button>
+                    </div>
+                    <div id="sql-result" class="overflow-x-auto"></div>
+                </div>
+            </section>
+        </main>
+    </div>
+
+    <script src="/shared.js"></script>
+    <script>
+        renderAdminShell('database');
+        let sqliteTablesData = {};
+        let activeSqliteTable = 'vms';
+
+        async function loadSqlite() {
+            const r = await api('/api/admin/sqlite/tables');
+            const d = await r.json();
+            sqliteTablesData = d.tables || {};
+            if (d.db_path) document.getElementById('sqlite-db-path').textContent = `Database: ${d.db_path}`;
+            const names = Object.keys(sqliteTablesData);
+            if (!names.includes(activeSqliteTable) && names.length) activeSqliteTable = names[0];
+            renderUsersTable(sqliteTablesData.users || []);
+            renderSqliteTabs();
+            renderSqliteTable();
+        }
+
+        function renderUsersTable(users) {
+            const tbody = document.getElementById('users-tbody');
+            if (!users.length) {
+                tbody.innerHTML = `<tr><td colspan="4" class="px-4 py-4 text-center text-[#486581] italic">No users in database.</td></tr>`;
+                return;
+            }
+            tbody.innerHTML = users.map(u => `
+                <tr class="hover:bg-sky-50/40">
+                    <td class="px-4 py-2.5 font-mono">${u.id}</td>
+                    <td class="px-4 py-2.5 font-semibold">${esc(u.username)}</td>
+                    <td class="px-4 py-2.5"><span class="px-2 py-0.5 rounded-full text-[10px] font-semibold ${u.role === 'admin' ? 'bg-amber-50 text-amber-800 border border-amber-200' : 'bg-sky-50 text-[#0b4f7c] border border-sky-200'}">${esc(u.role)}</span></td>
+                    <td class="px-4 py-2.5 text-right"><button onclick="deleteUser(${u.id}, '${esc(u.username)}')" class="text-xs font-semibold text-rose-700 hover:underline">Delete</button></td>
+                </tr>
+            `).join('');
+        }
+
+        async function deleteUser(id, username) {
+            if (!confirm(`Delete user "${username}" (ID ${id})?`)) return;
+            await api(`/api/admin/users/${id}`, { method: 'DELETE' });
+            loadSqlite();
+        }
+
+        function renderSqliteTabs() {
+            const tabsEl = document.getElementById('sqlite-tabs');
+            tabsEl.innerHTML = Object.keys(sqliteTablesData).map(name => {
+                const count = (sqliteTablesData[name] || []).length;
+                const active = name === activeSqliteTable;
+                return `<button onclick="selectSqliteTable('${esc(name)}')" class="text-xs font-semibold px-3 py-1.5 rounded-lg border ${active ? 'bg-[#0b4f7c] text-white border-[#0b4f7c]' : 'bg-white text-[#1e3a52] border-sky-200 hover:bg-sky-50'}">${esc(name)} (${count})</button>`;
+            }).join('');
+        }
+
+        function selectSqliteTable(name) {
+            activeSqliteTable = name;
+            renderSqliteTabs();
+            renderSqliteTable();
+        }
+
+        function renderSqliteTable() {
+            const wrap = document.getElementById('sqlite-table-wrap');
+            const rows = sqliteTablesData[activeSqliteTable] || [];
+            if (!rows.length) {
+                wrap.innerHTML = `<div class="p-6 text-center text-xs text-[#486581] italic">Table "${esc(activeSqliteTable)}" has 0 rows.</div>`;
+                return;
+            }
+            const cols = Object.keys(rows[0]);
+            const head = cols.map(c => `<th class="px-4 py-2.5 whitespace-nowrap">${esc(c)}</th>`).join('');
+            const body = rows.map(row => `<tr class="hover:bg-sky-50/40">${cols.map(c => `<td class="px-4 py-2 font-mono text-[11px] whitespace-nowrap">${esc(row[c])}</td>`).join('')}</tr>`).join('');
+            wrap.innerHTML = `<table class="w-full text-xs text-left"><thead class="bg-sky-50/70 text-[#486581] uppercase border-b border-sky-100"><tr>${head}</tr></thead><tbody class="divide-y divide-sky-100">${body}</tbody></table>`;
+        }
+
+        function setSqlPreset(q) {
+            const el = document.getElementById('sql-input');
+            el.value = q;
+            el.focus();
+        }
+
+        async function runCustomSql() {
+            const sql = document.getElementById('sql-input').value.trim();
+            const out = document.getElementById('sql-result');
+            if (!sql) return;
+            const r = await api('/api/admin/sqlite/query', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ sql })
+            });
+            const d = await r.json().catch(() => ({}));
+            if (!r.ok) {
+                out.innerHTML = `<div class="text-xs font-mono text-rose-800 bg-rose-50 border border-rose-200 rounded-lg p-3">${esc(d.error || 'SQL error')}</div>`;
+                return;
+            }
+            if (d.mode === 'select') {
+                if (!d.rows.length) {
+                    out.innerHTML = `<div class="text-xs text-[#486581] bg-white border border-sky-200 rounded-lg p-3">Query returned 0 rows.</div>`;
+                    return;
+                }
+                const head = d.columns.map(c => `<th class="px-3 py-2 whitespace-nowrap">${esc(c)}</th>`).join('');
+                const body = d.rows.map(row => `<tr class="hover:bg-sky-50/40">${row.map(v => `<td class="px-3 py-1.5 font-mono text-[11px] whitespace-nowrap">${esc(v)}</td>`).join('')}</tr>`).join('');
+                out.innerHTML = `<div class="bg-white border border-sky-200 rounded-xl overflow-x-auto"><div class="px-3 py-1.5 bg-emerald-50 border-b border-emerald-200 text-[11px] font-semibold text-emerald-800">${d.row_count} row(s) returned</div><table class="w-full text-xs text-left"><thead class="bg-sky-50/70 text-[#486581] uppercase border-b border-sky-100"><tr>${head}</tr></thead><tbody class="divide-y divide-sky-100">${body}</tbody></table></div>`;
+            } else {
+                out.innerHTML = `<div class="text-xs font-semibold text-emerald-800 bg-emerald-50 border border-emerald-200 rounded-lg p-3">${esc(d.mode === 'script' ? d.message : `Query OK (${d.rows_affected} row(s) affected).`)}</div>`;
+                loadSqlite();
+            }
+        }
+
+        document.getElementById('sql-input').addEventListener('keydown', (e) => {
+            if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
+                e.preventDefault();
+                runCustomSql();
+            }
+        });
+
+        document.getElementById('admin-user-form').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const r = await api('/api/admin/users', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    username: document.getElementById('u-name').value.trim(),
+                    password: document.getElementById('u-pass').value,
+                    role: document.getElementById('u-role').value
+                })
+            });
+            const d = await r.json().catch(() => ({}));
+            if (!r.ok) { alert(d.error || 'Failed to add user'); return; }
+            document.getElementById('u-name').value = '';
+            document.getElementById('u-pass').value = '';
+            loadSqlite();
+        });
+
+        loadSqlite();
+    </script>
+</body>
+</html>
